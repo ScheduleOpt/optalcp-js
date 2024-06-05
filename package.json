@@ -34,6 +34,6 @@
     "LICENSE.md"
   ],
   "bin": {
-    "optalcp.js": "build/main/bin/optalcp.js"
+    "optalcp": "build/main/bin/optalcp.js"
   }
 }
