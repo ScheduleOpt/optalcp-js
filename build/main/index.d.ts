@@ -7059,7 +7059,7 @@ export declare class Solver extends EventEmitter {
      *
      * ```ts
      * import * as fs from 'fs';
-     * import 8 as CP from 'optalcp';
+     * import * as CP from '@scheduleopt/optalcp';
      *
      * ...
      * let solver = new CP.Solver;
@@ -7791,7 +7791,7 @@ export type ProblemGenerator = (input: any) => ProblemDefinition | Model | Promi
  *
  * let params: CP.BenchmarkParameters = {
  *   // What to print when --help is specified (assuming that the program name is mybenchmark.js):
- *   usage: "Usage: node mybenchmark.js [options] <datafile1> [<datafile2> ...";
+ *   usage: "Usage: node mybenchmark.js [options] <datafile1> [<datafile2> ...",
  *   // Unless specified differently on the command line, the time limit will be 60s:
  *   timeLimit: 60
  * }

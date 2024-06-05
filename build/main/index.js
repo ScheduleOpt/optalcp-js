@@ -2671,8 +2671,16 @@ function calcSolverPath(params) {
     // First try to locate the full version:
     try {
         let binPath = import.meta.resolve("@scheduleopt/optalcp-bin/bin/");
+        // On Unix the URI looks like this:
+        //   file:///home/.../node_modules/@scheduleopt/optalcp-bin/bin/
+        // Then we have to strip the "file://" prefix, but not the third slash.
         if (binPath.startsWith("file://"))
             binPath = binPath.slice(7);
+        // On windows the URI may look like this:
+        //   file:///C:/Users/.../node_modules/@scheduleopt/optalcp-bin/bin/
+        // So we have to strip THREE slashes in this case:
+        if (process.platform == "win32" && binPath.startsWith("/"))
+            binPath = binPath.slice(1);
         let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
         if (fs.existsSync(result))
             return result;
@@ -2684,6 +2692,8 @@ function calcSolverPath(params) {
         let binPath = import.meta.resolve("@scheduleopt/optalcp-bin-preview/bin/");
         if (binPath.startsWith("file://"))
             binPath = binPath.slice(7);
+        if (process.platform == "win32" && binPath.startsWith("/"))
+            binPath = binPath.slice(1);
         let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
         if (fs.existsSync(result))
             return result;
@@ -7694,7 +7704,7 @@ export class Solver extends EventEmitter {
      *
      * ```ts
      * import * as fs from 'fs';
-     * import 8 as CP from 'optalcp';
+     * import * as CP from '@scheduleopt/optalcp';
      *
      * ...
      * let solver = new CP.Solver;
@@ -8994,7 +9004,7 @@ class Benchmarker {
  *
  * let params: CP.BenchmarkParameters = {
  *   // What to print when --help is specified (assuming that the program name is mybenchmark.js):
- *   usage: "Usage: node mybenchmark.js [options] <datafile1> [<datafile2> ...";
+ *   usage: "Usage: node mybenchmark.js [options] <datafile1> [<datafile2> ...",
  *   // Unless specified differently on the command line, the time limit will be 60s:
  *   timeLimit: 60
  * }

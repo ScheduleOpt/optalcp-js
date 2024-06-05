@@ -33,7 +33,7 @@
     "README.md",
     "LICENSE.md"
   ],
-  "bin": [
-    "build/main/bin/optalcp.js"
-  ]
+  "bin": {
+    "optalcp.js": "build/main/bin/optalcp.js"
+  }
 }
