@@ -6669,7 +6669,6 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  */
 export declare class Solver extends EventEmitter {
     #private;
-    constructor();
     /**
      * With `event="error"`, register given listener function to error events. The
      * function should take an `Error` parameter (standard Node.js class) and

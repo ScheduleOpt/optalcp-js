@@ -7303,11 +7303,6 @@ export class Solver extends EventEmitter {
     #outputStreamErrorCallback = () => {
         this.stop("Error in output stream");
     };
-    constructor() {
-        super();
-        assert(this.#outputStream !== null);
-        this.#outputStream.on('error', this.#outputStreamErrorCallback);
-    }
     // For type safety, we declared the events that are emitted by this class
     // above.  Another option is to use interface, then we would an interface,
     // then we would not have to implement the function below.
