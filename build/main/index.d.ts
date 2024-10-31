@@ -14,7 +14,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export declare const Version = "2024.5.0";
+export declare const Version = "2024.10.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -82,6 +82,10 @@ export declare const IntervalMin = -715827882;
  * @category Constants
  */
 export declare const LengthMax: number;
+/** @internal */
+export declare const FloatVarMax: number;
+/** @internal */
+export declare const FloatVarMin: number;
 /**
  * A value emitted by {@link Solver} as `summary` event at the end of the
  * solve.
@@ -210,6 +214,10 @@ export declare class FloatExpr extends ModelNode {
     /** @internal */
     _reusableFloatExpr(): FloatExpr;
     /** @internal */
+    _floatIdentity(arg: FloatExpr | number): void;
+    /** @internal */
+    _floatGuard(absentValue?: number): FloatExpr;
+    /** @internal */
     neg(): FloatExpr;
     /** @internal */
     _floatPlus(arg: FloatExpr | number): FloatExpr;
@@ -231,6 +239,10 @@ export declare class FloatExpr extends ModelNode {
     _floatGt(arg: FloatExpr | number): BoolExpr;
     /** @internal */
     _floatGe(arg: FloatExpr | number): BoolExpr;
+    /** @internal */
+    _floatInRange(lb: number, ub: number): BoolExpr;
+    /** @internal */
+    _floatNotInRange(lb: number, ub: number): BoolExpr;
     /** @internal */
     abs(): FloatExpr;
     /** @internal */
@@ -678,6 +690,26 @@ export declare class IntVar extends IntExpr {
     makeOptional(): IntVar;
     makeAbsent(): IntVar;
     makePresent(): IntVar;
+    setMin(min: number): this;
+    setMax(max: number): this;
+    setRange(min: number, max: number): this;
+}
+/** @internal */
+export declare class FloatVar extends FloatExpr {
+    /** @internal */
+    constructor(cp: Model);
+    /** @internal */
+    constructor(cp: Model, props: NodeProps, id: number);
+    /** @internal */
+    _makeAuxiliary(): void;
+    isOptional(): boolean;
+    isPresent(): boolean;
+    isAbsent(): boolean;
+    getMin(): number | null;
+    getMax(): number | null;
+    makeOptional(): FloatVar;
+    makeAbsent(): FloatVar;
+    makePresent(): FloatVar;
     setMin(min: number): this;
     setMax(max: number): this;
     setRange(min: number, max: number): this;
@@ -1417,8 +1449,13 @@ export declare class IntervalVar extends ModelNode {
     *
     * This constraint is the same as {@link Model.span}. */
     span(covered: IntervalVar[]): void;
-    /** @internal */
-    _rank(sequence: SequenceVar): IntExpr;
+    /**
+    * Creates an expression equal to the position of the interval on the sequence.
+    *
+    * @remarks
+    *
+    * This function is the same as {@link Model.position | Model.position}. */
+    position(sequence: SequenceVar): IntExpr;
     /**
     * Creates cumulative function (expression) _pulse_ for the interval variable and specified height.
     *
@@ -1807,6 +1844,19 @@ export type WorkerParameters = {
     */
     randomSeed?: number;
     /**
+    * The minimal amount of memory in kB for a single allocation.
+    *
+    * The solver allocates memory in blocks. This parameter sets the minimal size of a block. Larger blocks mean a higher risk of wasting memory. However, larger blocks may also lead to better performance, particularly when the size matches the page size supported by the operating system.
+    *
+    * The value of this parameter must be a power of 2.
+    *
+    * The default value is 2048 means 2MB, which means that up to ~12MB can be wasted per worker in the worst case.
+    *
+    * The parameter takes an unsigned integer value  in range `4..1073741824`.
+    * The default value is `2048`.
+    */
+    allocationBlockSize?: number;
+    /**
     *  @internal
     * Fail limit for each worker.
     *
@@ -1901,15 +1951,19 @@ export type WorkerParameters = {
     */
     reservoirPropagationLevel?: number;
     /**
-    *  @internal
-    * How much to propagate rank expressions on noOverlap constraints.
+    * How much to propagate position expressions on noOverlap constraints.
     *
+    * This parameter controls the amount of propagation done for position expressions on noOverlap constraints.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * However, more propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
     *
     *
     * The parameter takes an unsigned integer value  in range `1..3`.
     * The default value is `2`.
     */
-    _rankPropagationLevel?: number;
+    positionPropagationLevel?: number;
     /**
     * How much to propagate stepFunctionSum expression.
     *
@@ -2602,9 +2656,9 @@ export type WorkerParameters = {
     /**
     * Maximum number of feasibility checks.
     *
-    * Simple lower bound is computed by binary search for the best objective value that is not infeasible by propagation. This parameter limits the maximum number of iterations of the binary search.
+    * Simple lower bound is computed by binary search for the best objective value that is not infeasible by propagation. This parameter limits the maximum number of iterations of the binary search. When the value is 0 then simple lower bound is not computed at all.
     *
-    * The parameter takes an unsigned integer value  in range `1..2147483647`.
+    * The parameter takes an unsigned integer value  in range `0..2147483647`.
     * The default value is `2147483647`.
     */
     simpleLBMaxIterations?: number;
@@ -2627,6 +2681,16 @@ export type WorkerParameters = {
     * The default value is `1`.
     */
     _debugTraceLevel?: number;
+    /**
+    *  @internal
+    * Level of memory trace.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `0..5`.
+    * The default value is `0`.
+    */
+    _memoryTraceLevel?: number;
     /**
     *  @internal
     * Addition internal propagation trace.
@@ -2791,8 +2855,8 @@ export type WorkerParameters = {
     *
     *
     *
-    * The parameter takes an integer value  in range `0..128`.
-    * The default value is `64`.
+    * The parameter takes an integer value  in range `0..16`.
+    * The default value is `16`.
     */
     _discreteLowCapacityLimit?: number;
     /**
@@ -3017,7 +3081,7 @@ export type Parameters = {
     *
     *
     * The parameter takes a floating point value  in range `0.010000..Infinity`.
-    * The default value is `2`.
+    * The default value is `10`.
     */
     logPeriod?: number;
     /**
@@ -3028,6 +3092,19 @@ export type Parameters = {
     * The default value is `false`.
     */
     verifySolutions?: boolean;
+    /**
+    * The minimal amount of memory in kB for a single allocation.
+    *
+    * The solver allocates memory in blocks. This parameter sets the minimal size of a block. Larger blocks mean a higher risk of wasting memory. However, larger blocks may also lead to better performance, particularly when the size matches the page size supported by the operating system.
+    *
+    * The value of this parameter must be a power of 2.
+    *
+    * The default value is 2048 means 2MB, which means that up to ~12MB can be wasted per worker in the worst case.
+    *
+    * The parameter takes an unsigned integer value  in range `4..1073741824`.
+    * The default value is `2048`.
+    */
+    allocationBlockSize?: number;
     /**
     * Wall clock limit for execution.
     *
@@ -3165,15 +3242,19 @@ export type Parameters = {
     */
     reservoirPropagationLevel?: number;
     /**
-    *  @internal
-    * How much to propagate rank expressions on noOverlap constraints.
+    * How much to propagate position expressions on noOverlap constraints.
     *
+    * This parameter controls the amount of propagation done for position expressions on noOverlap constraints.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * However, more propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
     *
     *
     * The parameter takes an unsigned integer value  in range `1..3`.
     * The default value is `2`.
     */
-    _rankPropagationLevel?: number;
+    positionPropagationLevel?: number;
     /**
     * How much to propagate stepFunctionSum expression.
     *
@@ -3890,9 +3971,9 @@ export type Parameters = {
     /**
     * Maximum number of feasibility checks.
     *
-    * Simple lower bound is computed by binary search for the best objective value that is not infeasible by propagation. This parameter limits the maximum number of iterations of the binary search.
+    * Simple lower bound is computed by binary search for the best objective value that is not infeasible by propagation. This parameter limits the maximum number of iterations of the binary search. When the value is 0 then simple lower bound is not computed at all.
     *
-    * The parameter takes an unsigned integer value  in range `1..2147483647`.
+    * The parameter takes an unsigned integer value  in range `0..2147483647`.
     * The default value is `2147483647`.
     */
     simpleLBMaxIterations?: number;
@@ -3915,6 +3996,16 @@ export type Parameters = {
     * The default value is `1`.
     */
     _debugTraceLevel?: number;
+    /**
+    *  @internal
+    * Level of memory trace.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `0..5`.
+    * The default value is `0`.
+    */
+    _memoryTraceLevel?: number;
     /**
     *  @internal
     * Addition internal propagation trace.
@@ -4089,8 +4180,8 @@ export type Parameters = {
     *
     *
     *
-    * The parameter takes an integer value  in range `0..128`.
-    * The default value is `64`.
+    * The parameter takes an integer value  in range `0..16`.
+    * The default value is `16`.
     */
     _discreteLowCapacityLimit?: number;
     /**
@@ -4444,7 +4535,7 @@ export declare class Solution {
      */
     isPresent(variable: IntervalVar): boolean;
     /** @internal */
-    isPresent(variable: BoolVar | IntVar): boolean;
+    isPresent(variable: BoolVar | IntVar | FloatVar): boolean;
     /**
      * Returns true if the given variable is absent in the solution, i.e. if its
      * value is _absent_.  See optional {@link IntervalVar}.
@@ -4454,9 +4545,11 @@ export declare class Solution {
      */
     isAbsent(variable: IntervalVar): boolean;
     /** @internal */
-    isAbsent(variable: BoolVar | IntVar): boolean;
+    isAbsent(variable: BoolVar | IntVar | FloatVar): boolean;
     /** @internal */
-    getValue(variable: IntVar): number | null;
+    getValue(variable: BoolVar): boolean | null;
+    /** @internal */
+    getValue(variable: IntVar | FloatVar): number | null;
     /** @internal */
     getValue(variable: IntervalVar): IntervalVarValue;
     /**
@@ -4501,6 +4594,8 @@ export declare class Solution {
     setValue(boolVar: BoolVar, value: boolean): void;
     /** @internal */
     setValue(intVar: IntVar, value: number): void;
+    /** @internal */
+    setValue(floatVar: FloatVar, value: number): void;
     /**
      * Sets start and end of the given interval variable in the solution. I.e. the
      * interval variable will be present in the solution.
@@ -4515,7 +4610,7 @@ export declare class Solution {
     _serialize(): SerializedSolution;
 }
 /** @internal */
-type IntVarRange = {
+type NumVarRange = {
     presence: PresenceStatus;
     min?: number;
     max?: number;
@@ -4533,7 +4628,7 @@ type IntervalVarDomain = {
 /** @internal */
 type SerializedDomain = {
     id: number;
-    domain: IntVarRange | IntervalVarDomain;
+    domain: NumVarRange | IntervalVarDomain;
 };
 /** @internal */
 type SerializedModelDomains = Array<SerializedDomain> | null;
@@ -4611,22 +4706,22 @@ export declare class ModelDomains {
      * be absent any solution. */
     isPresent(v: IntervalVar): boolean;
     /** @internal */
-    isPresent(v: BoolVar | IntVar): boolean;
+    isPresent(v: BoolVar | IntVar | FloatVar): boolean;
     /**
      * Returns true if the variable is absent after propagation. I.e. it must be
      * absent in all solutions (if any). */
     isAbsent(v: IntervalVar): boolean;
     /** @internal */
-    isAbsent(v: BoolVar | IntVar): boolean;
+    isAbsent(v: BoolVar | IntVar | FloatVar): boolean;
     /** Returns true if the presence status of the variable is not decided by propagation.
      * I.e. the variable could be present or absent in a solution. */
     isOptional(v: IntervalVar): boolean;
     /** @internal */
-    isOptional(v: BoolVar | IntVar): boolean;
+    isOptional(v: BoolVar | IntVar | FloatVar): boolean;
     /** @internal */
-    getMin(v: BoolVar | IntVar): number | null;
+    getMin(v: BoolVar | IntVar | FloatVar): number | null;
     /** @internal */
-    getMax(v: BoolVar | IntVar): number | null;
+    getMax(v: BoolVar | IntVar | FloatVar): number | null;
     /**
      * Returns the minimum start time of the variable computed by constraint propagation.
      * If the variable is absent then it returns `null`. */
@@ -5184,6 +5279,10 @@ export declare class Model {
     /** @internal */
     _exprElement(expressions: (IntExpr | number)[], subscript: IntExpr | number): IntExpr;
     /** @internal */
+    _floatIdentity(arg1: FloatExpr | number, arg2: FloatExpr | number): void;
+    /** @internal */
+    _floatGuard(arg: FloatExpr | number, absentValue?: number): FloatExpr;
+    /** @internal */
     _floatNeg(arg: FloatExpr | number): FloatExpr;
     /** @internal */
     _floatPlus(arg1: FloatExpr | number, arg2: FloatExpr | number): FloatExpr;
@@ -5205,6 +5304,10 @@ export declare class Model {
     _floatGt(arg1: FloatExpr | number, arg2: FloatExpr | number): BoolExpr;
     /** @internal */
     _floatGe(arg1: FloatExpr | number, arg2: FloatExpr | number): BoolExpr;
+    /** @internal */
+    _floatInRange(arg: FloatExpr | number, lb: number, ub: number): BoolExpr;
+    /** @internal */
+    _floatNotInRange(arg: FloatExpr | number, lb: number, ub: number): BoolExpr;
     /** @internal */
     _floatAbs(arg: FloatExpr | number): FloatExpr;
     /** @internal */
@@ -5614,8 +5717,20 @@ export declare class Model {
     span(main: IntervalVar, covered: IntervalVar[]): void;
     /** @internal */
     _noOverlap(sequence: SequenceVar, transitions?: number[][]): void;
-    /** @internal */
-    _rank(interval: IntervalVar, sequence: SequenceVar): IntExpr;
+    /**
+    * Creates an expression equal to the position of the `interval` on the `sequence`.
+    *
+    * @remarks
+    *
+    * In the solution, the interval which is scheduled first has position 0, the second interval has position 1, etc. The position of an absent interval is `absent`.
+    *
+    * The `position` expression cannot be used with interval variables of possibly zero length (because position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
+    *
+    * @see {@link IntervalVar.position | IntervalVar.position} is equivalent function on {@link IntervalVar}.
+    * @see {@link Model.noOverlap} for constraints on overlapping intervals.
+    * @see {@link Model.sequenceVar} for creating sequence variables.
+    *  */
+    position(interval: IntervalVar, sequence: SequenceVar): IntExpr;
     /** @internal */
     _sameSequence(sequence1: SequenceVar, sequence2: SequenceVar): void;
     /** @internal */
@@ -6031,6 +6146,14 @@ export declare class Model {
     /** @internal */
     _disjunctiveIsBefore(x: IntervalVar, y: IntervalVar): BoolExpr;
     /** @internal */
+    _itvPresenceChain(intervals: IntervalVar[]): void;
+    /** @internal */
+    _itvPresenceChainWithCount(intervals: IntervalVar[], count: IntExpr | number): void;
+    /** @internal */
+    _endBeforeStartChain(intervals: IntervalVar[]): void;
+    /** @internal */
+    _startBeforeStartChain(intervals: IntervalVar[]): void;
+    /** @internal */
     _decisionPresentIntVar(variable: IntExpr | number, isLeft: boolean): SearchDecision;
     /** @internal */
     _decisionAbsentIntVar(variable: IntExpr | number, isLeft: boolean): SearchDecision;
@@ -6284,6 +6407,22 @@ export declare class Model {
     }): IntVar;
     /** @internal */
     auxiliaryIntVar(name?: string): IntVar;
+    /** @internal */
+    floatVar({ range, optional, name }: {
+        range?: [number?, number?] | number;
+        optional?: boolean;
+        name?: string;
+    }): FloatVar;
+    /** @internal */
+    floatVar(name?: string): FloatVar;
+    /** @internal */
+    auxiliaryFloatVar({ range, optional, name }: {
+        range?: [number?, number?] | number;
+        optional?: boolean;
+        name?: string;
+    }): FloatVar;
+    /** @internal */
+    auxiliaryFloatVar(name?: string): FloatVar;
     /**
      * Creates a new interval variable and adds it to the model.
      *

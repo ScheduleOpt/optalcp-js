@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2024.5.0";
+export const Version = "2024.10.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -63,6 +63,10 @@ export const IntervalMin = -715827882;
  * @category Constants
  */
 export const LengthMax = IntervalMax - IntervalMin;
+/** @internal */
+export const FloatVarMax = Number.MAX_VALUE;
+/** @internal */
+export const FloatVarMin = -FloatVarMax;
 // === Model nodes ===========================================================
 /**
  * The base class for all modeling objects.
@@ -189,6 +193,18 @@ export class FloatExpr extends ModelNode {
         return result;
     }
     /** @internal */
+    _floatIdentity(arg) {
+        let outParams = [this._getArg(), GetFloatExpr(arg)];
+        const result = new Constraint(this._cp, "floatIdentity", outParams);
+        this._cp.constraint(result);
+    }
+    /** @internal */
+    _floatGuard(absentValue = 0) {
+        let outParams = [this._getArg(), GetFloat(absentValue)];
+        const result = new FloatExpr(this._cp, "floatGuard", outParams);
+        return result;
+    }
+    /** @internal */
     neg() {
         let outParams = [this._getArg()];
         const result = new FloatExpr(this._cp, "floatNeg", outParams);
@@ -252,6 +268,18 @@ export class FloatExpr extends ModelNode {
     _floatGe(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
         const result = new BoolExpr(this._cp, "floatGe", outParams);
+        return result;
+    }
+    /** @internal */
+    _floatInRange(lb, ub) {
+        let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
+        const result = new BoolExpr(this._cp, "floatInRange", outParams);
+        return result;
+    }
+    /** @internal */
+    _floatNotInRange(lb, ub) {
+        let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
+        const result = new BoolExpr(this._cp, "floatNotInRange", outParams);
         return result;
     }
     /** @internal */
@@ -864,6 +892,48 @@ export class IntVar extends IntExpr {
     setRange(min, max) {
         this._props.min = GetInt(min);
         this._props.max = GetInt(max);
+        return this;
+    }
+}
+/** @internal */
+export class FloatVar extends FloatExpr {
+    constructor(cp, props, id) {
+        if (props === undefined) {
+            super(cp, "floatVar", []);
+            this._forceRef();
+        }
+        else
+            super(cp, props, id);
+    }
+    /** @internal */
+    _makeAuxiliary() { this._props.func = "_floatVar"; }
+    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
+    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
+    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    getMin() {
+        if (this.isAbsent())
+            return null;
+        return this._props.min ?? FloatVarMin;
+    }
+    getMax() {
+        if (this.isAbsent())
+            return null;
+        return this._props.max ?? FloatVarMax;
+    }
+    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
+    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; return this; }
+    makePresent() { this._props.status = undefined; return this; }
+    setMin(min) {
+        this._props.min = GetFloat(min);
+        return this;
+    }
+    setMax(max) {
+        this._props.max = GetFloat(max);
+        return this;
+    }
+    setRange(min, max) {
+        this._props.min = GetFloat(min);
+        this._props.max = GetFloat(max);
         return this;
     }
 }
@@ -1660,10 +1730,15 @@ export class IntervalVar extends ModelNode {
         const result = new Constraint(this._cp, "span", outParams);
         this._cp.constraint(result);
     }
-    /** @internal */
-    _rank(sequence) {
+    /**
+    * Creates an expression equal to the position of the interval on the sequence.
+    *
+    * @remarks
+    *
+    * This function is the same as {@link Model.position | Model.position}. */
+    position(sequence) {
         let outParams = [this._getArg(), GetSequenceVar(sequence)];
-        const result = new IntExpr(this._cp, "rank", outParams);
+        const result = new IntExpr(this._cp, "position", outParams);
         return result;
     }
     /**
@@ -2360,6 +2435,7 @@ Major options:\n\
   --warningLevel uint32            Level of warnings\n\
   --logPeriod double               How often to print log messages (in seconds)\n\
   --verifySolutions bool           When on, the correctness of solutions is verified\n\
+  --allocationBlockSize uint32     The minimal amount of memory in kB for a single allocation\n\
 \n\
 Limits:\n\
   --timeLimit double               Wall clock limit for execution\n\
@@ -2375,6 +2451,8 @@ Propagation levels:\n\
   --cumulPropagationLevel uint32   How much to propagate constraints on cumul functions\n\
   --reservoirPropagationLevel uint32\n\
                                    How much to propagate constraints on cumul functions\n\
+  --positionPropagationLevel uint32\n\
+                                   How much to propagate position expressions on noOverlap constraints\n\
   --stepFunctionSumPropagationLevel uint32\n\
                                    How much to propagate stepFunctionSum expression\n\
   --usePrecedenceEnergy uint32     Whether to use precedence energy propagation algorithm\n\
@@ -2834,6 +2912,14 @@ let ParameterCatalog = {
     setVerifySolutions: function (params, value) {
         params.verifySolutions = value;
     },
+    // AllocationBlockSize
+    setAllocationBlockSize: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter AllocationBlockSize: value " + value + " is not an integer.");
+        if (value < 4 || value > 1073741824)
+            throw Error("Parameter AllocationBlockSize: value " + value + " is not in required range 4..1073741824.");
+        workerParams.allocationBlockSize = value;
+    },
     // TimeLimit
     setTimeLimit: function (params, value) {
         if (value < 0.000000 || value > Infinity)
@@ -2925,14 +3011,13 @@ let ParameterCatalog = {
             throw Error("Parameter ReservoirPropagationLevel: value " + value + " is not in required range 1..2.");
         workerParams.reservoirPropagationLevel = value;
     },
-    // RankPropagationLevel
-    /** @internal */
-    _setRankPropagationLevel: function (workerParams, value) {
+    // PositionPropagationLevel
+    setPositionPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
-            throw Error("Parameter RankPropagationLevel: value " + value + " is not an integer.");
+            throw Error("Parameter PositionPropagationLevel: value " + value + " is not an integer.");
         if (value < 1 || value > 3)
-            throw Error("Parameter RankPropagationLevel: value " + value + " is not in required range 1..3.");
-        workerParams._rankPropagationLevel = value;
+            throw Error("Parameter PositionPropagationLevel: value " + value + " is not in required range 1..3.");
+        workerParams.positionPropagationLevel = value;
     },
     // StepFunctionSumPropagationLevel
     setStepFunctionSumPropagationLevel: function (workerParams, value) {
@@ -3483,8 +3568,8 @@ let ParameterCatalog = {
     setSimpleLBMaxIterations: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter SimpleLBMaxIterations: value " + value + " is not an integer.");
-        if (value < 1 || value > 2147483647)
-            throw Error("Parameter SimpleLBMaxIterations: value " + value + " is not in required range 1..2147483647.");
+        if (value < 0 || value > 2147483647)
+            throw Error("Parameter SimpleLBMaxIterations: value " + value + " is not in required range 0..2147483647.");
         workerParams.simpleLBMaxIterations = value;
     },
     // SimpleLBShavingRounds
@@ -3503,6 +3588,15 @@ let ParameterCatalog = {
         if (value < 0 || value > 5)
             throw Error("Parameter DebugTraceLevel: value " + value + " is not in required range 0..5.");
         workerParams._debugTraceLevel = value;
+    },
+    // MemoryTraceLevel
+    /** @internal */
+    _setMemoryTraceLevel: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter MemoryTraceLevel: value " + value + " is not an integer.");
+        if (value < 0 || value > 5)
+            throw Error("Parameter MemoryTraceLevel: value " + value + " is not in required range 0..5.");
+        workerParams._memoryTraceLevel = value;
     },
     // PropagationDetailTraceLevel
     /** @internal */
@@ -3636,8 +3730,8 @@ let ParameterCatalog = {
     _setDiscreteLowCapacityLimit: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter DiscreteLowCapacityLimit: value " + value + " is not an integer.");
-        if (value < 0 || value > 128)
-            throw Error("Parameter DiscreteLowCapacityLimit: value " + value + " is not in required range 0..128.");
+        if (value < 0 || value > 16)
+            throw Error("Parameter DiscreteLowCapacityLimit: value " + value + " is not in required range 0..16.");
         workerParams._discreteLowCapacityLimit = value;
     },
     // LNSTrainingObjectiveLimit
@@ -3714,6 +3808,12 @@ let parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog.setVerifySolutions,
     },
+    allocationblocksize: {
+        name: 'AllocationBlockSize',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setAllocationBlockSize,
+        setOnWorker: ParameterCatalog.setAllocationBlockSize,
+    },
     timelimit: {
         name: 'TimeLimit',
         parse: ParseNumber,
@@ -3782,11 +3882,11 @@ let parserConfig = {
         setGlobally: ParameterCatalog.setReservoirPropagationLevel,
         setOnWorker: ParameterCatalog.setReservoirPropagationLevel,
     },
-    rankpropagationlevel: {
-        name: 'RankPropagationLevel',
+    positionpropagationlevel: {
+        name: 'PositionPropagationLevel',
         parse: ParseNumber,
-        setGlobally: ParameterCatalog._setRankPropagationLevel,
-        setOnWorker: ParameterCatalog._setRankPropagationLevel,
+        setGlobally: ParameterCatalog.setPositionPropagationLevel,
+        setOnWorker: ParameterCatalog.setPositionPropagationLevel,
     },
     stepfunctionsumpropagationlevel: {
         name: 'StepFunctionSumPropagationLevel',
@@ -4224,6 +4324,12 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setDebugTraceLevel,
         setOnWorker: ParameterCatalog._setDebugTraceLevel,
     },
+    memorytracelevel: {
+        name: 'MemoryTraceLevel',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setMemoryTraceLevel,
+        setOnWorker: ParameterCatalog._setMemoryTraceLevel,
+    },
     propagationdetailtracelevel: {
         name: 'PropagationDetailTraceLevel',
         parse: ParseNumber,
@@ -4518,7 +4624,12 @@ export class Solution {
         return this.#values[variable._getId()] === null;
     }
     getValue(variable) {
-        return this.#values[variable._getId()];
+        let result = this.#values[variable._getId()];
+        if (!(variable instanceof BoolVar))
+            return result;
+        if (result === null)
+            return null;
+        return result === 1;
     }
     /**
      * Returns start of the given interval variable in the solution.
@@ -4562,7 +4673,7 @@ export class Solution {
         if (variable instanceof IntervalVar)
             this.#values[variable._getId()] = { start: args[0], end: args[1] };
         else
-            this.#values[variable._getId()] = args[0];
+            this.#values[variable._getId()] = +args[0]; // Plus converts boolean to number
     }
     /** @internal */
     _serialize() {
@@ -4874,6 +4985,7 @@ export class Model {
     #knownArrays = new WeakMap;
     #boolVars = [];
     #intVars = [];
+    #floatVars = [];
     #intervalVars = [];
     /**
      * Creates a new empty model.
@@ -5377,6 +5489,18 @@ export class Model {
         return result;
     }
     /** @internal */
+    _floatIdentity(arg1, arg2) {
+        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
+        const result = new Constraint(this, "floatIdentity", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
+    _floatGuard(arg, absentValue = 0) {
+        let outParams = [GetFloatExpr(arg), GetFloat(absentValue)];
+        const result = new FloatExpr(this, "floatGuard", outParams);
+        return result;
+    }
+    /** @internal */
     _floatNeg(arg) {
         let outParams = [GetFloatExpr(arg)];
         const result = new FloatExpr(this, "floatNeg", outParams);
@@ -5440,6 +5564,18 @@ export class Model {
     _floatGe(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
         const result = new BoolExpr(this, "floatGe", outParams);
+        return result;
+    }
+    /** @internal */
+    _floatInRange(arg, lb, ub) {
+        let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
+        const result = new BoolExpr(this, "floatInRange", outParams);
+        return result;
+    }
+    /** @internal */
+    _floatNotInRange(arg, lb, ub) {
+        let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
+        const result = new BoolExpr(this, "floatNotInRange", outParams);
         return result;
     }
     /** @internal */
@@ -5985,10 +6121,22 @@ export class Model {
         const result = new Constraint(this, "noOverlap", outParams);
         this.constraint(result);
     }
-    /** @internal */
-    _rank(interval, sequence) {
+    /**
+    * Creates an expression equal to the position of the `interval` on the `sequence`.
+    *
+    * @remarks
+    *
+    * In the solution, the interval which is scheduled first has position 0, the second interval has position 1, etc. The position of an absent interval is `absent`.
+    *
+    * The `position` expression cannot be used with interval variables of possibly zero length (because position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
+    *
+    * @see {@link IntervalVar.position | IntervalVar.position} is equivalent function on {@link IntervalVar}.
+    * @see {@link Model.noOverlap} for constraints on overlapping intervals.
+    * @see {@link Model.sequenceVar} for creating sequence variables.
+    *  */
+    position(interval, sequence) {
         let outParams = [GetIntervalVar(interval), GetSequenceVar(sequence)];
-        const result = new IntExpr(this, "rank", outParams);
+        const result = new IntExpr(this, "position", outParams);
         return result;
     }
     /** @internal */
@@ -6510,6 +6658,30 @@ export class Model {
         return result;
     }
     /** @internal */
+    _itvPresenceChain(intervals) {
+        let outParams = [this._getIntervalVarArray(intervals)];
+        const result = new Constraint(this, "itvPresenceChain", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
+    _itvPresenceChainWithCount(intervals, count) {
+        let outParams = [this._getIntervalVarArray(intervals), GetIntExpr(count)];
+        const result = new Constraint(this, "itvPresenceChainWithCount", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
+    _endBeforeStartChain(intervals) {
+        let outParams = [this._getIntervalVarArray(intervals)];
+        const result = new Constraint(this, "endBeforeStartChain", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
+    _startBeforeStartChain(intervals) {
+        let outParams = [this._getIntervalVarArray(intervals)];
+        const result = new Constraint(this, "startBeforeStartChain", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
     _decisionPresentIntVar(variable, isLeft) {
         let outParams = [GetIntExpr(variable), GetBool(isLeft)];
         const result = new SearchDecision(this, "decisionPresentIntVar", outParams);
@@ -6708,6 +6880,33 @@ export class Model {
     }
     auxiliaryIntVar(arg) {
         let x = this.intVar(arg);
+        x._makeAuxiliary();
+        return x;
+    }
+    floatVar(arg) {
+        const x = new FloatVar(this);
+        if (typeof arg === "string")
+            x.setName(arg);
+        else if (typeof arg === "object") {
+            if (arg.name)
+                x.setName(arg.name);
+            if (arg.optional)
+                x.makeOptional();
+            if (typeof arg.range === "number")
+                x.setRange(arg.range, arg.range);
+            else if (Array.isArray(arg.range)) {
+                if (arg.range[0] !== undefined)
+                    x.setMin(arg.range[0]);
+                if (arg.range[1] !== undefined)
+                    x.setMax(arg.range[1]);
+            }
+        }
+        this.#model.push(x._getArg());
+        this.#floatVars.push(x);
+        return x;
+    }
+    auxiliaryFloatVar(arg) {
+        let x = this.floatVar(arg);
         x._makeAuxiliary();
         return x;
     }
@@ -8491,8 +8690,8 @@ class Benchmarker {
             header += "Seed".padStart(10);
         header +=
             "Status".padStart(13) +
-                "Objective".padStart(12) +
                 "LowerBound".padStart(12) +
+                "Objective".padStart(12) +
                 "Time".padStart(12) +
                 "Sol.time".padStart(12) +
                 "Solutions".padStart(12) +
@@ -8519,8 +8718,8 @@ class Benchmarker {
         let f = this.#formatResult(r);
         line +=
             f.status.padStart(13) +
-                f.objective.padStart(12) +
                 f.lowerBound.padStart(12) +
+                f.objective.padStart(12) +
                 f.duration.padStart(12) +
                 f.solutionTime.padStart(12) +
                 f.nbSolutions.padStart(12) +
@@ -8576,8 +8775,8 @@ class Benchmarker {
             else
                 result.status = "Solution";
         }
-        result.objective = this.#formatObjectiveValue(r.objective);
         result.lowerBound = this.#formatObjectiveValue(r.lowerBound);
+        result.objective = this.#formatObjectiveValue(r.objective);
         result.duration = r.duration.toFixed(2);
         result.solutionTime = r.bestSolutionTime === undefined ? "" : r.bestSolutionTime.toFixed(2);
         result.lbTime = r.bestLBTime === undefined ? "" : r.bestLBTime.toFixed(2);
@@ -8607,8 +8806,8 @@ class Benchmarker {
             prefix += " ";
         console.log(prefix +
             "Mean: ".padStart(10) +
-            this.#objective.getAverage().toPrecision(9).padStart(12) +
             this.#lowerBound.getAverage().toPrecision(9).padStart(12) +
+            this.#objective.getAverage().toPrecision(9).padStart(12) +
             this.#durations.getAverage().toFixed(2).padStart(12) +
             this.#solveTime.getAverage().toFixed(2).padStart(12) +
             this.#solutions.getAverage().toFixed(2).padStart(12) +
@@ -8617,8 +8816,8 @@ class Benchmarker {
             this.#branches.getAverage().toFixed(0).padStart(12));
         console.log(prefix +
             "Std. Dev: ".padStart(10) +
-            this.#objective.getStdDev().toPrecision(9).padStart(12) +
             this.#lowerBound.getStdDev().toPrecision(9).padStart(12) +
+            this.#objective.getStdDev().toPrecision(9).padStart(12) +
             this.#durations.getStdDev().toFixed(2).padStart(12) +
             this.#solveTime.getStdDev().toFixed(2).padStart(12) +
             this.#solutions.getStdDev().toFixed(2).padStart(12) +
@@ -8627,8 +8826,8 @@ class Benchmarker {
             this.#branches.getStdDev().toFixed(0).padStart(12));
         console.log(prefix +
             "Min: ".padStart(10) +
-            this.#objective.min.toPrecision(9).padStart(12) +
             this.#lowerBound.min.toPrecision(9).padStart(12) +
+            this.#objective.min.toPrecision(9).padStart(12) +
             this.#durations.min.toFixed(2).padStart(12) +
             this.#solveTime.min.toFixed(2).padStart(12) +
             this.#solutions.min.toFixed(2).padStart(12) +
@@ -8637,8 +8836,8 @@ class Benchmarker {
             this.#branches.min.toFixed(0).padStart(12));
         console.log(prefix +
             "Max: ".padStart(10) +
-            this.#objective.max.toPrecision(9).padStart(12) +
             this.#lowerBound.max.toPrecision(9).padStart(12) +
+            this.#objective.max.toPrecision(9).padStart(12) +
             this.#durations.max.toFixed(2).padStart(12) +
             this.#solveTime.max.toFixed(2).padStart(12) +
             this.#solutions.max.toFixed(2).padStart(12) +

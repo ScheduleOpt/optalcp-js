@@ -15,7 +15,7 @@ function readModel(filename) {
     return problem;
 }
 let params = {
-    usage: "Usage: optalcp.js [OPTIONS] INPUT_FILE1.json [INPUT_FILE2.json] .."
+    usage: "Usage: npx optalcp [OPTIONS] INPUT_FILE1.json [INPUT_FILE2.json] .."
 };
 let args = process.argv.slice(2);
 if (args.length == 0)
