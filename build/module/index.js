@@ -6,7 +6,7 @@
  * This file is confidential and only available to authorized individuals with the
  * permission of the copyright holders.  If you encounter this file and do not have
  * permission, please contact the copyright holders and delete this file.
- r*/
+ */
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2024.10.0";
+export const Version = "2024.11.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -115,8 +115,8 @@ export class ModelNode {
      *
      * @remarks
      *
-     * Assigning a name is optional. However is useful for debugging because
-     * variable names appear in the development traces. It is also useful for
+     * Assigning a name is optional. However, it is helpful for debugging because
+     * variable names appear in the development traces. It is also helpful for
      * exporting the model to a file (see {@link problem2json}).
      *
      * @example
@@ -152,11 +152,6 @@ export class ModelNode {
         }
         return this.#arg;
     }
-    // For IsSame functions that compare two nodes:
-    /** @internal */
-    _getCurrentArg() {
-        return this.#arg;
-    }
     // For variables that must always have an ID:
     /** @internal */
     _forceRef() {
@@ -170,13 +165,19 @@ export class ModelNode {
 /**
  * @internal
  */
+class ArrayNode extends ModelNode {
+    #isNodeArray;
+}
+/**
+ * @internal
+ */
 class Constraint extends ModelNode {
-    // Void field actually does not exists on runtime however makes the types
+    // Void field actually does not exist on runtime; however, it makes the types
     // different so that we cannot pass Constraint to a function that expects
     // BoolExprArg.
     #isConstraint;
 }
-// If we don't document FloatExpr then it is not visible that IntExpr derives
+// If we don't document FloatExpr, then it is not visible that IntExpr derives
 // from ModelNode.
 /**
  * A class representing floating-point expression in the model.
@@ -309,7 +310,7 @@ export class FloatExpr extends ModelNode {
 }
 /**
  * A class that represents an integer expression in the model.  The expression
- * may depend on a value of a variable (or variables) and so the value of the
+ * may depend on the value of a variable (or variables), so the value of the
  * expression is not known until a solution is found.
  * The value must be in the range {@link IntVarMin} to {@link IntVarMax}.
  *
@@ -327,21 +328,21 @@ export class FloatExpr extends ModelNode {
  *
  * ### Optional integer expressions
  *
- * Underlying variables of an integer expression may be optional, i.e. they may
+ * Underlying variables of an integer expression may be optional, i.e., they may
  * or may not be present in a solution (for example, an optional task
- * can be completely omitted from the solution). In this case the value of the
+ * can be omitted entirely from the solution). In this case, the value of the
  * integer expression is _absent_. The value _absent_ means that the variable
- * has no meaning, it does not exist in the solution.
+ * has no meaning; it does not exist in the solution.
  *
- * With an exception of {@link guard} expression, any value of an integer
+ * Except {@link guard} expression, any value of an integer
  * expression that depends on an absent variable is also _absent_.
  * As we don't know the value of the expression before the solution is found,
  * we call such expression _optional_.
  *
  * @example
  *
- * In the following model, there is optional interval variable `x` and
- * non-optional interval variable `y`.  We add a constraint that end of `x` plus
+ * In the following model, there is an optional interval variable `x` and
+ * a non-optional interval variable `y`.  We add a constraint that the end of `x` plus
  * 10 must be less or equal to the start of `y`:
  * ```ts
  * let model = new CP.Model();
@@ -361,24 +362,24 @@ export class FloatExpr extends ModelNode {
  *  * The expression `afterX` is optional for the same reason.
  *  * The expression `startY` is not optional because it depends only on a
  *    non-optional variable `y`.
- *  * Boolean expression `isBefore` is also optional. It's value could be
+ *  * Boolean expression `isBefore` is also optional. Its value could be
  *    _true_, _false_ or _absent_.
  *
  * The expression `isBefore` is turned into a constraint using
- * {@link Model.constraint | Model.constraint}. Therefore it cannot be _false_
- * in the solution. However it can still be _absent_. Therefore the constraint
+ * {@link Model.constraint | Model.constraint}. Therefore, it cannot be _false_
+ * in the solution. However, it can still be _absent_. Therefore the constraint
  * `isBefore` can be satisfied in two ways:
  *
- * 1. Both `x` and `y` are present, `x` is before `y` and the delay between them
- *    is at least 10. In this case `isBefore` is _true_.
- * 2. `x` is absent and `y` is present. In this case `isBefore` is _absent_.
+ * 1. Both `x` and `y` are present, `x` is before `y`, and the delay between them
+ *    is at least 10. In this case, `isBefore` is _true_.
+ * 2. `x` is absent and `y` is present. In this case, `isBefore` is _absent_.
  *
  * @category Modeling
  */
 export class IntExpr extends FloatExpr {
     #isIntExpr;
     /**
-     * Minimize the expression. I.e. search for a solution that achieves the minimal
+     * Minimize the expression. I.e., search for a solution that achieves the minimal
      * value of the expression.
      *
      * @remarks
@@ -400,7 +401,7 @@ export class IntExpr extends FloatExpr {
         this._cp.minimize(this);
     }
     /**
-     * Maximize the expression. I.e. search for a solution that achieves the maximal
+     * Maximize the expression. I.e., search for a solution that achieves the maximal
      * value of the expression.
      *
      * @remarks
@@ -468,7 +469,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.plus | Model.plus}. */
     plus(arg) {
@@ -479,7 +480,7 @@ export class IntExpr extends FloatExpr {
     /**
     * Returns subtraction of the expression and `arg`.@remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.minus | Model.minus}. */
     minus(arg) {
@@ -490,7 +491,7 @@ export class IntExpr extends FloatExpr {
     /**
     * Returns multiplication of the expression and `arg`.@remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.times | Model.times}. */
     times(arg) {
@@ -503,7 +504,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.div | Model.div}. */
     div(arg) {
@@ -550,7 +551,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -565,7 +566,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -580,7 +581,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -595,7 +596,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -625,7 +626,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression has value _absent_, then the resulting expression has also value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -646,7 +647,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression has value _absent_, the resulting expression also has value _absent_.
     *
     * Same as {@link Model.abs | Model.abs}.  */
     abs() {
@@ -659,9 +660,9 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
-    * Same as {@link Model.min2 | Model.min2}. See {@link Model.min} for n-ary minimum. */
+    * Same as {@link Model.min2 | Model.min2}. See {@link Model.min} for the n-ary minimum. */
     min2(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
         const result = new IntExpr(this._cp, "intMin2", outParams);
@@ -672,7 +673,7 @@ export class IntExpr extends FloatExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.max2 | Model.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
     max2(arg) {
@@ -689,12 +690,12 @@ export class IntExpr extends FloatExpr {
 }
 /**
  * A class that represents a boolean expression in the model.
- * The expression may depend on one or more variables and therefore its value
+ * The expression may depend on one or more variables; therefore, its value
  * may be unknown until a solution is found.
  *
  * @example
  *
- * For example, the following code creates two interval variables `x` and `y`
+ * For example, the following code creates two interval variables, `x` and `y`
  * and a boolean expression `isBefore` that is true if `x` ends before `y` starts,
  * that is, if the end of `x` is less than or equal to
  * the start of `y` (see {@link IntExpr.le | IntExpr.le}):
@@ -708,7 +709,7 @@ export class IntExpr extends FloatExpr {
  *
  * Boolean expressions can be used to create constraints using function {@link
  * Model.constraint | Model.constraint}. In the example above, we may require that `isBefore` is
- * true:
+ * true or _absent_:
  * ```ts
  * model.constraint(isBefore);
  * ```
@@ -716,28 +717,28 @@ export class IntExpr extends FloatExpr {
  * ### Optional boolean expressions
  *
  * _OptalCP_ is using 3-value logic: a boolean expression can be _true_, _false_
- * or _absent_. Typically the the expression is _absent_ only if one or
- * more underlying variables is _absent_.  The value _absent_
+ * or _absent_. Typically, the expression is _absent_ only if one or
+ * more underlying variables are _absent_.  The value _absent_
  * means that the expression doesn't have a meaning because one or more
- * underlying variables are absent (they are not part of the solution).
+ * underlying variables are absent (not part of the solution).
  *
  * ### Difference between constraints and boolean expressions
  *
  * Boolean expressions can take arbitrary value (_true_, _false_, or _absent_)
- * and can be combined into composed expressions (e.g. using {@link and} or
+ * and can be combined into composed expressions (e.g., using {@link and} or
  * {@link or}).
  *
  * Constraints can only be _true_ or _absent_ (in a solution) and cannot
  * be combined into composed expressions.
  *
  * Some functions create constraints directly, e.g. {@link Model.noOverlap}.
- * Then, it is not necessary to to pass them to function {@link Model.constraint}.
+ * Then, passing them to function {@link Model.constraint} is unnecessary.
  * It is also not possible to combine constraints into composed expressions
  * such as `or(noOverlap(..), noOverlap(..))`.
  *
  * @example
  *
- * Let's consider a similar example to the one above but with optional interval
+ * Let's consider a similar example to the one above but with an optional interval
  * variables `a` and `b`:
  *
  * ```ts
@@ -753,19 +754,19 @@ export class IntExpr extends FloatExpr {
  * constraint cannot be _false_ in a solution. It could be _absent_ though.
  * Therefore, in our example, there are four kinds of solutions:
  *
- * 1. Both `a` and `b` are present and `a` ends before `b` starts.
- * 2. Only `a` is present and `b` is absent.
- * 3. Only `b` is present and `a` is absent.
+ * 1. Both `a` and `b` are present, and `a` ends before `b` starts.
+ * 2. Only `a` is present, and `b` is absent.
+ * 3. Only `b` is present, and `a` is absent.
  * 4. Both `a` and `b` are absent.
  *
- * In the case 1 the expression `isBefore` is _true_. In all the other cases
+ * In case 1, the expression `isBefore` is _true_. In all the other cases
  * `isBefore` is _absent_ as at least one of the variables `a` and `b` is
  * absent, and then `isBefore` doesn't have a meaning.
  *
  * ### Boolean expressions as integer expressions
  *
- * Class `BoolExpr` derives from {@link IntExpr}. Therefore boolean expressions can be used
- * as integer expressions. In this case _true_ is equal to _1_, _false_ is
+ * Class `BoolExpr` derives from {@link IntExpr}. Therefore, boolean expressions can be used
+ * as integer expressions. In this case, _true_ is equal to _1_, _false_ is
  * equal to _0_, and _absent_ remains _absent_.
  *
  * @category Modeling
@@ -809,7 +810,7 @@ export class BoolExpr extends IntExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.and | Model.and}. */
     and(arg) {
@@ -822,7 +823,7 @@ export class BoolExpr extends IntExpr {
     *
     * @remarks
     *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
+    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
     *
     * Same as {@link Model.implies | Model.implies}. */
     implies(arg) {
@@ -980,7 +981,7 @@ export class BoolVar extends BoolExpr {
     }
 }
 /**
- * Interval variable is a task, action, operation or any other interval with a start
+ * Interval variable is a task, action, operation, or any other interval with a start
  * and an end. The start and the end of the interval are unknowns that the solver
  * has to find. They could be accessed as integer expressions using
  * {@link IntervalVar.start | IntervalVar.start} and {@link IntervalVar.end | IntervalVar.end}.
@@ -989,16 +990,16 @@ export class BoolVar extends BoolExpr {
  * has a length (equal to _end - start_) that can be accessed using
  * {@link IntervalVar.length | IntervalVar.length} or {@link Model.lengthOf | Model.lengthOf}.
  *
- * The interval variable can be optional. In this case the solver can decide
- * to make the interval absent, what is usually interpreted as the fact that
- * the interval doesn't exist, the task/action was not executed or the operation
- * was not performed.  When the interval variable is absent then its start, end
- * and length are also absent.  Boolean expression that represents the presence
+ * The interval variable can be optional. In this case, the solver can decide
+ * to make the interval absent, which is usually interpreted as the fact that
+ * the interval doesn't exist, the task/action was not executed, or the operation
+ * was not performed.  When the interval variable is absent, its start, end,
+ * and length are also absent.  A boolean expression that represents the presence
  * of the interval variable can be accessed using
  * {@link IntervalVar.presence | IntervalVar.presence} and {@link Model.presenceOf | Model.presenceOf}.
  *
  *
- * Interval variables can be created using function
+ * Interval variables can be created using the function
  * {@link Model.intervalVar | Model.intervalVar}.
  * By default, interval variables are _present_ (not optional).
  * To create an optional interval, specify `optional: true` in the
@@ -1007,7 +1008,7 @@ export class BoolVar extends BoolExpr {
  * @example: present interval variables
  *
  * In the following example we create three present interval variables `x`, `y` and `z`
- * and we make sure that they don't overlap.  Then we minimize the maximum of
+ * and we make sure that they don't overlap.  Then, we minimize the maximum of
  * the end times of the three intervals (the makespan):
  * ```ts
  * let model = CP.Model();
@@ -1022,10 +1023,10 @@ export class BoolVar extends BoolExpr {
  * @example: optional interval variables
  *
  * In the following example, there is a task _X_ that could be performed by two
- * different workers _A_ and _B_.  Interval variable `X` represents the task,
- * it is not optional because the task `X` is mandatory. Interval variable
- * `XA` represents the task `X` in the case when performed by worker _A_ and
- * similarly `XB` represents the task `X` in the case when performed by worker _B_.
+ * different workers _A_ and _B_.  The interval variable `X` represents the task.
+ * It is not optional because the task `X` is mandatory. Interval variable
+ * `XA` represents the task `X` when performed by worker _A_ and
+ * similarly `XB` represents the task `X` when performed by worker _B_.
  * Both `XA` and `XB` are optional because it is not known beforehand which
  * worker will perform the task.  The constraint {@link alternative} links
  * `X`, `XA` and `XB` together and ensures that only one of `XA` and `XB` is present and that
@@ -1064,9 +1065,9 @@ export class IntervalVar extends ModelNode {
     _makeAuxiliary() { this._props.func = "_intervalVar"; }
     /**
      * Returns _true_ if the interval variable was created as _optional_.
-     * Optional interval variable can be _absent_ in the solution, i.e. it can be omitted.
+     * Optional interval variable can be _absent_ in the solution, i.e., it can be omitted.
      *
-     * **Note:** This function checks presence status of the variable in the model
+     * **Note:** This function checks the presence status of the variable in the model
      * (before the solve), not in the solution.
      *
      * @see {@link isPresent}, {@link isAbsent}
@@ -1077,9 +1078,9 @@ export class IntervalVar extends ModelNode {
      * Returns _true_ if the interval variable was created _present_ (and
      * therefore cannot be _absent_ in the solution).
      *
-     * **Note:** This function returns presence status of the interval in the
+     * **Note:** This function returns the presence status of the interval in the
      * model (before the solve), not in the solution.  In particular, for an
-     * optional interval variable this function returns _false_, even though there
+     * optional interval variable, this function returns _false_, even though there
      * could be a solution in which the interval is _present_.
      *
      * @see {@link isOptional}, {@link isAbsent}
@@ -1090,9 +1091,9 @@ export class IntervalVar extends ModelNode {
      * Returns _true_ if the interval variable was created _absent_ (and therefore
      * cannot be _present_ in the solution).
      *
-     * **Note:** This function checks presence status of the interval in the model
+     * **Note:** This function checks the presence status of the interval in the model
      * (before the solve), not in the solution.  In particular, for an optional
-     * interval variable this function returns _false_, even though there could be
+     * interval variable, this function returns _false_, even though there could be
      * a solution in which the interval is _absent_.
      *
      * @see {@link isOptional}, {@link isPresent}
@@ -1104,9 +1105,9 @@ export class IntervalVar extends ModelNode {
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setStart} or function {@link setStartMin}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns minimum start of the interval in the
+     * **Note:** This function returns the minimum start of the interval in the
      * model (before the solve), not in the solution.
      */
     getStartMin() {
@@ -1119,9 +1120,9 @@ export class IntervalVar extends ModelNode {
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setStart} or function {@link setStartMax}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns maximum start of the interval in the
+     * **Note:** This function returns the maximum start of the interval in the
      * model (before the solve), not in the solution.
      */
     getStartMax() {
@@ -1134,9 +1135,9 @@ export class IntervalVar extends ModelNode {
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setEnd} or function {@link setEndMin}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns minimum end of the interval in the
+     * **Note:** This function returns the minimum end of the interval in the
      * model (before the solve), not in the solution.
      */
     getEndMin() {
@@ -1149,9 +1150,9 @@ export class IntervalVar extends ModelNode {
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setEnd} or function {@link setEndMax}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns maximum end of the interval in the
+     * **Note:** This function returns the maximum end of the interval in the
      * model (before the solve), not in the solution.
      */
     getEndMax() {
@@ -1164,9 +1165,9 @@ export class IntervalVar extends ModelNode {
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setLength} or function {@link setLengthMin}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns minimum length of the interval in the
+     * **Note:** This function returns the minimum length of the interval in the
      * model (before the solve), not in the solution.
      */
     getLengthMin() {
@@ -1175,13 +1176,13 @@ export class IntervalVar extends ModelNode {
         return this._props.lengthMin ?? 0;
     }
     /**
-     * Returns maximum length assigned to the interval variable during its
+     * Returns the maximum length assigned to the interval variable during its
      * construction by {@link Model.intervalVar | Model.intervalVar} or later by
      * function {@link setLength} or function {@link setLengthMax}.
      *
-     * If the interval is absent then the function returns `null`.
+     * If the interval is absent, the function returns `null`.
      *
-     * **Note:** This function returns maximum length of the interval in the
+     * **Note:** This function returns the maximum length of the interval in the
      * model (before the solve), not in the solution.
      */
     getLengthMax() {
@@ -1192,24 +1193,24 @@ export class IntervalVar extends ModelNode {
     // Modifiers for fluent API:
     /**
      * Makes the interval variable _optional_.  Optional interval variable can be
-     * _absent_ in the solution, i.e. it can be omitted.
+     * _absent_ in the solution i.e. can be omitted.
      *
      * It is equivalent to setting `optional: true` in {@link Model.intervalVar | Model.intervalVar}.
      *
-     * @returns Returns the interval variable itself in order to allow chaining.
+     * @returns Returns the interval variable itself to allow chaining.
      *
      * @see {@link makePresent}, {@link makeAbsent}
      * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
      */
     makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
     /**
-     * Makes the interval variable _present_.  Present interval variable cannot be
-     * _absent_ in the solution, i.e. it cannot be omitted.
+     * Makes the interval variable _present_.  The present interval variable cannot be
+     * _absent_ in the solution, i.e., cannot be omitted.
      *
-     * It is equivalent to setting `optional: false` (or completely omitting it)
+     * It is equivalent to setting `optional: false`
      * in {@link Model.intervalVar | Model.intervalVar}.
      *
-     * @returns Returns the interval variable itself in order to allow chaining.
+     * @returns Returns the interval variable itself to allow chaining.
      *
      * @see {@link makeOptional}, {@link makeAbsent}
      * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
@@ -1217,10 +1218,10 @@ export class IntervalVar extends ModelNode {
     makePresent() { this._props.status = undefined; return this; }
     /**
      * Makes the interval variable _absent_.  Absent interval variable cannot be
-     * _present_ in the solution, i.e. it will be omitted in the solution (and
+     * _present_ in the solution, i.e., it will be omitted in the solution (and
      * everything that depends on it).
      *
-     * @returns Returns the interval variable itself in order to allow chaining.
+     * @returns Returns the interval variable itself to allow chaining.
      *
      * @see {@link makeOptional}, {@link makePresent}
      * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
@@ -1235,12 +1236,12 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets minimum start of the interval variable to the given value.
+     * Sets the minimum start of the interval variable to the given value.
      *
      * It overwrites any previous minimum start limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setStart} or {@link setStartMin}.
-     * The maximum start is not changed by this function.
+     * This function does not change the maximum start.
      *
      * Note that the start of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
      *
@@ -1252,12 +1253,12 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets maximum start of the interval variable to the given value.
+     * Sets the maximum start of the interval variable to the given value.
      *
      * It overwrites any previous maximum start limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setStart} or {@link setStartMax}.
-     * The minimum start not changed by this function.
+     * The minimum start is not changed by this function.
      *
      * Note that the start of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
      *
@@ -1277,12 +1278,12 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets minimum end of the interval variable to the given value.
+     * Sets the minimum end of the interval variable to the given value.
      *
      * It overwrites any previous minimum end limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setEnd} or {@link setEndMin}.
-     * The maximum end is not changed by this function.
+     * This function does not change the maximum end.
      *
      * Note that the end of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
      *
@@ -1294,11 +1295,11 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets maximum end of the interval variable to the given value.
+     * Sets the maximum end of the interval variable to the given value.
      * It overwrites any previous maximum end limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setEnd} or {@link setEndMax}.
-     * The minimum end is not changed by this function.
+     * This function does not change the minimum end.
      *
      * Note that the end of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
      *
@@ -1318,11 +1319,11 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets minimum length of the interval variable to the given value.
+     * Sets the minimum length of the interval variable to the given value.
      * It overwrites any previous minimum length limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setLength} or {@link setLengthMin}.
-     * The maximum length is not changed by this function.
+     * This function does not change the maximum length.
      *
      * Note that the length of the interval variable must be in the range 0 to {@link LengthMax}.
      *
@@ -1334,13 +1335,13 @@ export class IntervalVar extends ModelNode {
         return this;
     }
     /**
-     * Sets maximum length of the interval variable to the given value.
+     * Sets the maximum length of the interval variable to the given value.
      * It overwrites any previous maximum length limit given at variable creation by
      * {@link Model.intervalVar | Model.intervalVar} or later by
      * {@link setLength} or {@link setLengthMax}.
-     * The minimum length is not changed by this function.
+     * This function does not change the minimum length.
      *
-     * Note that the length of the interval variable must be in the range to {@link LengthMax}.
+     * Note that the length of the interval cannot exceed than {@link LengthMax}.
      *
      * @see {@link setLength}, {@link setLengthMin}
      * @see {@link getLengthMin}, {@link getLengthMax}
@@ -1365,11 +1366,11 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * If the interval variable is absent then the resulting expression is also absent.
+    * If the interval variable is absent, then the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -1394,11 +1395,11 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * If the interval variable is absent then the resulting expression is also absent.
+    * If the interval variable is absent, then the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -1423,11 +1424,11 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * If the interval variable is absent then the resulting expression is also absent.
+    * If the interval variable is absent, then the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -1448,7 +1449,7 @@ export class IntervalVar extends ModelNode {
         return result;
     }
     /**
-    * Creates an integer expression for the start of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -1463,7 +1464,7 @@ export class IntervalVar extends ModelNode {
         return result;
     }
     /**
-    * Creates an integer expression for the end of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -1478,7 +1479,7 @@ export class IntervalVar extends ModelNode {
         return result;
     }
     /**
-    * Creates an integer expression for the length of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -1517,7 +1518,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.endBeforeEnd | Model.endBeforeEnd }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1542,7 +1543,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.endBeforeStart | Model.endBeforeStart }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1567,7 +1568,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.startBeforeEnd | Model.startBeforeEnd }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1592,7 +1593,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.startBeforeStart | Model.startBeforeStart }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1617,7 +1618,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.endAtEnd | Model.endAtEnd }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1642,7 +1643,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.endAtStart | Model.endAtStart }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1667,7 +1668,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.startAtEnd | Model.startAtEnd }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1692,7 +1693,7 @@ export class IntervalVar extends ModelNode {
     *
     * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link Model.startAtStart | Model.startAtStart }      is equivalent function on {@link Model}.
     * @see {@link Model.constraint}
@@ -1707,7 +1708,7 @@ export class IntervalVar extends ModelNode {
     /**
     * Creates alternative constraints for the interval variable and provided `options`.
     *
-    * @param options Interval variables to chose from.
+    * @param options Interval variables to choose from.
     *
     * @remarks
     *
@@ -1791,10 +1792,10 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
     *
     * @see {@link Model.forbidExtent} for the equivalent function on {@link Model}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain start/end of an interval variable.
+    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
     * @see {@link Model.stepFunctionEval} for evaluation of a step function.
     *  */
     forbidExtent(func) {
@@ -1813,7 +1814,7 @@ export class IntervalVar extends ModelNode {
     *   model.constraint(func.stepFunctionEval(interval.start()).ne(0));
     * ```
     *
-    * That is, function value at the start of the interval variable cannot be zero.
+    * I.e., the function value at the start of the interval variable cannot be zero.
     *
     * @see {@link Model.forbidStart} for the equivalent function on {@link Model}.
     * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -1835,7 +1836,7 @@ export class IntervalVar extends ModelNode {
     *   model.constraint(func.stepFunctionEval(interval.end()).ne(0));
     * ```
     *
-    * That is, function value at the end of the interval variable cannot be zero.
+    * I.e., the function value at the end of the interval variable cannot be zero.
     *
     * @see {@link Model.forbidEnd} for the equivalent function on {@link Model}.
     * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -1857,15 +1858,13 @@ export class IntervalVar extends ModelNode {
 /**
  * Models a sequence (order) of interval variables.
  *
- * Sequence variable is used together with {@link noOverlap} constraint
- * that ensures that a set of interval variables do not overlap.
+ * Sequence variable is used with {@link noOverlap} constraint
+ * to ensure that some interval variables do not overlap.
  * Such no-overlapping set of interval variables will form a sequence in the solution.
  * The sequence variable captures this order of interval variables
- * and allows to express additional constraints on the order.
+ * and allows additional constraints on the order to be stated.
  *
- * At the moment, sequence variable only allows to specify interval variable
- * types for constraining transition distances between the intervals
- * (see {@link Model.sequenceVar}).
+ * @see {@link Model.position}.
  */
 export class SequenceVar extends ModelNode {
     #isSequenceVar;
@@ -1886,18 +1885,18 @@ export class SequenceVar extends ModelNode {
      *
      * @remarks
      *
-     * The `noOverlap` constraint make sure that the intervals in the sequence
+     * The `noOverlap` constraint makes sure that the intervals in the sequence
      * do not overlap.  That is, for every pair of interval variables `x` and `y`
      * at least one of the following conditions must hold (in a solution):
      *
      * 1. Interval variable `x` is _absent_. This means that the interval is not
-     *    present in the solution (not performed) and therefore it cannot overlap
+     *    present in the solution (not performed), so it cannot overlap
      *    with any other interval. Only optional interval variables can be _absent_.
      * 2. Interval variable `y` is _absent_.
      * 3. `x` ends before `y` starts, i.e. `x.end()` is less or equal to `y.start()`.
      * 4. `y` ends before `x` starts, i.e. `y.end()` is less or equal to `x.start()`.
      *
-     * In addition, if `transitions` parameter is specified then the cases 3 and 4
+     * In addition, if the `transitions` parameter is specified, then the cases 3 and 4
      * are further constrained by the minimum transition distance between the
      * intervals:
      *
@@ -1905,13 +1904,13 @@ export class SequenceVar extends ModelNode {
      * 4. `y.end() + transitions[y.type][x.type]` is less or equal to `x.start()`.
      *
      * where `x.type` and `y.type` are the types of the interval variables `x` and `y`
-     * as given in {@link Model.sequenceVar | Model.sequenceVar}. If types were not specified
+     * as given in {@link Model.sequenceVar | Model.sequenceVar}. If types were not specified,
      * then they are equal to the indices of the interval variables in the array
      * passed to {@link Model.sequenceVar | Model.sequenceVar}. Transition times
      * cannot be negative.
      *
      * Note that transition times are enforced between every pair of interval variables,
-     * no only between direct neighbors.
+     * not only between direct neighbors.
      *
      * The size of the 2D array `transitions` must be equal to the number of types
      * of the interval variables.
@@ -1931,12 +1930,12 @@ export class SequenceVar extends ModelNode {
      * * `location` of the task (where it must be performed),
      * * a time window `startMin` to `endMax` when the task must be performed.
      *
-     * There are three locations `0`, `1` and `2`, the minimum travel time between
-     * the locations is given by a transition matrix `transitions`. Transition times
+     * There are three locations, `0`, `1`, and `2`. The minimum travel times between
+     * the locations are given by a transition matrix `transitions`. Transition times
      * are not symmetric. For example, it takes 10 minutes to travel from location `0`
      * to location `1` but 15 minutes to travel back from location `1` to location `0`.
      *
-     * We are going to model this problem using `noOverlap` constraint with transition times.
+     * We will model this problem using `noOverlap` constraint with transition times.
      *
      * ```ts
      * // Travel times between locations:
@@ -1996,24 +1995,24 @@ export class SequenceVar extends ModelNode {
 /**
  * Cumulative expression.
  *
- * Cumulative expression represents a resource usage over time.  The resource
- * could be a machine, a group of workers, a material, anything of a limited
+ * Cumulative expression represents resource usage over time.  The resource
+ * could be a machine, a group of workers, a material, or anything of a limited
  * capacity.  The resource usage is not known in advance as it depends on the
- * variables of the problem.  Cumulative expressions allow to model the resource
+ * variables of the problem.  Cumulative expressions allow us to model the resource
  * usage and constrain it.
  *
  * Basic cumulative expressions are:
  *
  * * ***Pulse***: the resource is used over an interval of time.
- *   For example, pulse can be used to represent a task that requires certain
- *   number of workers during its execution.  At the beginning of the interval
- *   the resource usage increases by a given amount and at the end of the
- *   interval the resource usage decreases by the same amount.
+ *   For example, a pulse can represent a task requiring a certain
+ *   number of workers during its execution.  At the beginning of the interval,
+ *   the resource usage increases by a given amount, and at the end of the
+ *   interval, the resource usage decreases by the same amount.
  *   Pulse can be created by function {@link Model.pulse | Model.pulse}
  *   or {@link IntervalVar.pulse | IntervalVar.pulse }.
- * * ***Step***: given amount of resource is consumed or produced at a specified
- *   time (e.g. at a start of an interval variable).
- *   Steps can be used to represent an inventory of a material that is
+ * * ***Step***: a given amount of resource is consumed or produced at a specified
+ *   time (e.g., at the start of an interval variable).
+ *   Steps may represent an inventory of a material that is
  *   consumed or produced by some tasks (a _reservoir_).
  *   Steps can be created by functions
  *   {@link Model.stepAtStart | Model.stepAtStart},
@@ -2022,7 +2021,7 @@ export class SequenceVar extends ModelNode {
  *   {@link IntervalVar.stepAtEnd | IntervalVar.stepAtEnd}. and
  *   {@link Model.stepAt | Model.stepAt}.
  *
- * Cumulative expressions can be combined together using
+ * Cumulative expressions can be combined using
  * {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link cumulNeg} and
  * {@link Model.cumulSum}.  The resulting cumulative expression represents
  * a sum of the resource usage of the combined expressions.
@@ -2076,7 +2075,7 @@ export class CumulExpr extends ModelNode {
     /**
     * Constraints the cumulative function to be everywhere less or equal to `maxCapacity`.
     *
-    * This function can be used to specify the maximum limit of resource usage at any time. For example to limit number of workers working simultaneously, limit the maximum amount of material on stock etc.
+    * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
     * See {@link Model.pulse} for an example with `cumulLe`.
     *
     * @see {@link Model.cumulLe | Model.cumulLe} for the equivalent function on {@link Model}.
@@ -2121,7 +2120,7 @@ export class CumulExpr extends ModelNode {
  * values in range {@link IntVarMin} to {@link IntVarMax}. The function can be
  * created by {@link Model.intStepFunction}.
  *
- * Step functions can be used following ways:
+ * Step functions can be used in the following ways:
  *
  *   * Function {@link Model.stepFunctionEval} evaluates the function at the given point (given as {@link IntExpr}).
  *   * Function {@link Model.stepFunctionSum} computes a sum (integral) of the function over an {@link IntervalVar}.
@@ -2146,7 +2145,7 @@ export class IntStepFunction extends ModelNode {
     *
     * @remarks
     *
-    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. That is, the sum includes the function value at the start time, but not the value at the end time. If the interval variable has zero length then the result is 0. If the interval variable is absent then the result is `absent`.
+    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. The sum includes the function value at the start time but not the value at the end time. If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is `absent`.
     *
     * **Requirement**: The step function `func` must be non-negative.
     *
@@ -2168,7 +2167,7 @@ export class IntStepFunction extends ModelNode {
     *
     * @remarks
     *
-    * The result is the value of the step function at the point `arg`. If the value of `arg` is `absent` then the result is also `absent`.
+    * The result is the value of the step function at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
     *
     * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
     *
@@ -2252,13 +2251,6 @@ function GetFloatExpr(arg) {
     return arg._getArg();
 }
 /** @internal */
-function IsSameFloatExpr(lhs, rhs) {
-    if (typeof lhs == 'number' || typeof lhs == 'boolean')
-        return lhs === rhs;
-    VerifyInstanceOf(lhs, FloatExpr);
-    return lhs._getCurrentArg() === rhs;
-}
-/** @internal */
 function GetIntExpr(arg) {
     if (typeof arg == 'number')
         return GetInt(arg);
@@ -2266,15 +2258,6 @@ function GetIntExpr(arg) {
         return arg;
     VerifyInstanceOf(arg, IntExpr);
     return arg._getArg();
-}
-/** @internal */
-function IsSameIntExpr(lhs, rhs) {
-    if (typeof lhs == 'number')
-        return GetInt(lhs) === rhs;
-    if (typeof lhs == 'boolean')
-        return lhs === rhs;
-    VerifyInstanceOf(lhs, IntExpr);
-    return lhs._getCurrentArg() === rhs;
 }
 /** @internal */
 function GetSafeArg(arg) {
@@ -2288,13 +2271,6 @@ function GetBoolExpr(arg) {
         return arg;
     VerifyInstanceOf(arg, BoolExpr);
     return arg._getArg();
-}
-/** @internal */
-function IsSameBoolExpr(lhs, rhs) {
-    if (typeof (lhs) == 'boolean')
-        return lhs === rhs;
-    VerifyInstanceOf(lhs, BoolExpr);
-    return lhs._getCurrentArg() === rhs;
 }
 /** @internal */
 function GetConstraint(arg) {
@@ -2360,7 +2336,7 @@ function IsCumulExprArray(arg) {
 }
 /**
  * This function creates a deep copy of the input {@link Parameters} object.
- * It could be used to copy the parameters and modify them without affecting
+ * Afterwards, the copy can be modified without affecting
  * the original {@link Parameters} object.
  *
  * @param params The {@link Parameters} object to copy.
@@ -2389,7 +2365,7 @@ export function copyParameters(params) {
  * @remarks
  *
  * The new object contains all parameters from both inputs.  If the same
- * parameter is specified in both input objects then the value from the second
+ * parameter is specified in both input objects, then the value from the second
  * object `modifications` is used.
  *
  * Input objects are not modified.
@@ -2442,8 +2418,8 @@ Limits:\n\
   --solutionLimit uint64           Stop the search after the given number of solutions\n\
 \n\
 Gap Tolerance:\n\
-  --absoluteGapTolerance double    Stop the search when gap is below the tolerance\n\
-  --relativeGapTolerance double    Stop the search when gap is below the tolerance\n\
+  --absoluteGapTolerance double    Stop the search when the gap is below the tolerance\n\
+  --relativeGapTolerance double    Stop the search when the gap is below the tolerance\n\
 \n\
 Propagation levels:\n\
   --noOverlapPropagationLevel uint32\n\
@@ -2535,20 +2511,20 @@ function handleHelp(args, params, help) {
  *
  * @remarks
  *
- * For a command-line oriented application, it is useful to specify solver parameters
+ * For a command-line-oriented application, it is helpful to specify solver parameters
  * using command-line arguments.  This function parses command-line arguments and
  * returns a {@link Parameters} object.
  *
- * Parameter _params_ is input/output.  It may contain default setting that will
+ * Parameter _params_ is input/output.  It may contain a default setting that will
  * be overwritten during parsing.
  *
  * In case of an error (e.g.
  * unrecognized parameter or an invalid parameter value) the function prints the
  * error an calls `process.exit(1)`.
  *
- * If `--help` or `-h` is given then the function prints help and calls
+ * If `--help` or `-h` is given, then the function prints help and calls
  * `process.exit(0)`.  The printed help starts by
- * `params.usage` followed by the list of recognized parameters which looks like this:
+ * `params.usage` followed by the list of recognized parameters, which looks like this:
  *
  * ```text
  * Help:
@@ -2569,7 +2545,7 @@ function handleHelp(args, params, help) {
  *   --logLevel uint32                Level of the log
  *   --warningLevel uint32            Level of warnings
  *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, correctness of solutions is verified
+ *   --verifySolutions bool           When on, the correctness of solutions is verified
  *
  * Limits:
  *   --timeLimit double               Wall clock limit for execution
@@ -2579,11 +2555,10 @@ function handleHelp(args, params, help) {
  * ```
  *
  * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
- * For example, `--worker0.searchType FDS` sets the search type for the first worker only.
+ * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
  * @see This function does not accept any unrecognized arguments. See function
- * {@link parseSomeParameters} if you want to allow unrecognized arguments
- * and parse them later.
+ * {@link parseSomeParameters} to handle unrecognized arguments differently.
  *
  * @see See {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    functions that parse {@link BenchmarkParameters}.
@@ -2597,31 +2572,31 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
     return params;
 }
 /**
- * Parses command-line solver parameters and returns array of unrecognized arguments.
+ * Parses command-line solver parameters and returns an array of unrecognized arguments.
  *
  * @param params The input/output object.  The function will overwrite the
  *             parameters with values specified on the command line.
- * @param args  The command-line arguments to parse.  If not specified then
+ * @param args  The command-line arguments to parse.  If not specified, then
  *           `process.argv.slice(2)` is used.
  * @returns An array of unrecognized arguments.
  *
  * @remarks
  *
- * For a command-line oriented application, it is useful to specify solver parameters
+ * For a command-line-oriented application, it is helpful to specify solver parameters
  * using command-line arguments.  This function parses command-line arguments and
  * modifies the input _params_ object accordingly. It returns an array of
  * unrecognized arguments that were not parsed.
  *
- * The function is similar to {@link parseParameters} but it does not stop
+ * The function is similar to {@link parseParameters}, but it does not stop
  * if an unrecognized parameter is encountered.  Instead, it returns an array of
  * unrecognized arguments.  The caller can then decide what to do with them.
  * The function can still call `process.exit(1)` if another type of error is
  * encountered.
  *
- * The parameter `params` is input/output.  It may contain default setting that
+ * The parameter `params` is input/output.  It may contain a default setting that
  * will be overwritten during parsing.
  *
- * If `--help` or `-h` is given then the function prints help and calls
+ * If `--help` or `-h` is given, then the function prints help and calls
  * `process.exit(0)`.  The printed help is created by concatenating `params.usage`
  * and the list of recognized parameters which looks like this:
  *
@@ -2644,7 +2619,7 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
  *   --logLevel uint32                Level of the log
  *   --warningLevel uint32            Level of warnings
  *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, correctness of solutions is verified
+ *   --verifySolutions bool           When on, the correctness of solutions is verified
  *
  * Limits:
  *   --timeLimit double               Wall clock limit for execution
@@ -2654,9 +2629,9 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
  * ```
  *
  * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
- * For example, `--worker0.searchType FDS` sets the search type for the first worker only.
+ * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
- * @see {@link parseParameters} for a similar function that don't accept unrecognized arguments.
+ * @see {@link parseParameters} for a similar function that doesn't accept unrecognized arguments.
  *
  * @see functions {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    for parsing {@link BenchmarkParameters}.
@@ -2724,13 +2699,13 @@ function paramsFromJSON(params) {
  *
  * @remarks
  *
- * This function is used to computed the path to `optalcp` binary, for example
- * when {@link solve} is called.  Normally, there's no need to call this function
+ * This function is used to compute the path to `optalcp` binary, for example,
+ * when {@link solve} is called.  Usually, there's no need to call this function
  * directly.  However, it could be used to check the path in case of problems.
  *
  * The function works as follows:
- *   * If `OPTALCP_SOLVER` environment variable is set then it is used as the path.
- *   * If `params.solverPath` is set then its value is returned.
+ *   * If the `OPTALCP_SOLVER` environment variable is set, then it is used as the path.
+ *   * If `params.solverPath` is set, its value is returned.
  *   * If npm package `@scheduleopt/optalcp-bin` is installed then
  *     it is searched for the `optalcp` executable.
  *   * If npm package `optalcp-bin-preview` is installed then
@@ -2827,8 +2802,8 @@ function ParseString(value) {
 }
 /**
  @internal
- Currently contains only necessary stuff for parsing command line.
- In the future it may contain everything needed for setting parameter values in a GUI.
+ Currently, it contains only the necessary stuff for parsing the command line.
+ In the future, it may contain everything needed to set parameter values in a GUI.
 */
 let ParameterCatalog = {
     // Color
@@ -3715,6 +3690,11 @@ let ParameterCatalog = {
             throw Error("Parameter HeuristicReplayTraceLevel: value " + value + " is not in required range 0..5.");
         workerParams._heuristicReplayTraceLevel = value;
     },
+    // AllowSetTimesProofs
+    /** @internal */
+    _setAllowSetTimesProofs: function (workerParams, value) {
+        workerParams._allowSetTimesProofs = value;
+    },
     // SetTimesAggressiveDominance
     /** @internal */
     _setSetTimesAggressiveDominance: function (workerParams, value) {
@@ -4407,6 +4387,12 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setHeuristicReplayTraceLevel,
         setOnWorker: ParameterCatalog._setHeuristicReplayTraceLevel,
     },
+    allowsettimesproofs: {
+        name: 'AllowSetTimesProofs',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setAllowSetTimesProofs,
+        setOnWorker: ParameterCatalog._setAllowSetTimesProofs,
+    },
     settimesaggressivedominance: {
         name: 'SetTimesAggressiveDominance',
         parse: ParseBool,
@@ -4581,7 +4567,7 @@ class ParameterParser {
  *
  * ### Evaluation version of OptalCP
  *
- * Note that in evaluation version of OptalCP the values of variables in
+ * Note that in the evaluation version of OptalCP, the values of variables in
  * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
  *
  * @category Solving
@@ -4590,10 +4576,10 @@ export class Solution {
     #values;
     #objective;
     /**
-     * Creates an empty solution. That is, all variables are absent and the
+     * Creates an empty solution. That is, all variables are absent, and the
      * objective value is _undefined_.
      *
-     * Use this function to create a an external solution that can be passed to
+     * Use this function to create an external solution that can be passed to
      * the solver before the solve starts as a _warmStart_ (see {@link solve},
      * {@link Solver}) or during the solve using {@link Solver.sendSolution}.
      */
@@ -4601,7 +4587,7 @@ export class Solution {
         this.#values = [];
         this.#objective = undefined;
     }
-    /** @internal (read from message sent by the solver) */
+    /** @internal (read from a message sent by the solver) */
     _init(msg) {
         this.#values = [];
         for (var v of msg.values)
@@ -4609,11 +4595,11 @@ export class Solution {
         this.#objective = msg.objective;
     }
     /**
-     * Returns objective value of the solution. If the model did not specify an
+     * Returns the objective value of the solution. If the model did not specify an
      * objective returns _undefined_. If the objective value is _absent_
      * (see optional {@link IntExpr}) then it returns _null_.
      *
-     * The correct value is reported even in case of evaluation version of OptalCP.
+     * The correct value is reported even in the evaluation version of OptalCP.
      */
     getObjective() { return this.#objective; }
     /** @internal */
@@ -4632,10 +4618,10 @@ export class Solution {
         return result === 1;
     }
     /**
-     * Returns start of the given interval variable in the solution.
-     * If the variable is absent in the solution then it returns _null_.
+     * Returns the start of the given interval variable in the solution.
+     * If the variable is absent in the solution, it returns _null_.
      *
-     * In evaluation version of OptalCP this function always returns `null`
+     * In the evaluation version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getStart(variable) {
@@ -4645,10 +4631,10 @@ export class Solution {
         return null;
     }
     /**
-     * Returns end of the given interval variable in the solution.
-     * If the variable is absent in the solution then it returns _null_.
+     * Returns the end of the given interval variable in the solution.
+     * If the variable is absent in the solution, it returns _null_.
      *
-     * In evaluation version of OptalCP this function always returns `null`
+     * In the evaluation version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getEnd(variable) {
@@ -4660,7 +4646,7 @@ export class Solution {
     /**
      * Sets objective value of the solution.
      *
-     * Normally, solution is completely constructed by the solver.  This function
+     * This function
      * can be used for construction of an external solution that can be passed to
      * the solver (see {@link solve}, {@link Solver} and {@link
      * Solver.sendSolution}).
@@ -4697,7 +4683,7 @@ export class Solution {
  * Propagation removes inconsistent values from domains of variables using
  * constraint propagation. It does not fix variables to values (in general).
  *
- * For each variable, this class provide a way to query the computed domain,
+ * For each variable, this class provides a way to query the computed domain,
  * e.g. using function {@link ModelDomains.getStartMin}.
  *
  * @category Propagation
@@ -4797,12 +4783,12 @@ export class ModelDomains {
  * _Model_ captures the problem to be solved. It contains variables,
  * constraints and objective function.
  *
- * To create an optimization model, you need to first create a _Model_ object.
+ * To create an optimization model, you must first create a _Model_ object.
  * Then you can use the methods of the _Model_ to create variables (e.g.  {@link
  * intervalVar}), the objective function ({@link minimize} or {@link maximize})
  * and constraints (e.g. {@link constraint} or {@link noOverlap}).
  * Note that a boolean expression becomes a constraint only by passing it to
- * the function {@link constraint} otherwise it is not enforced.
+ * the function {@link constraint}; otherwise, it is not enforced.
  *
  * To solve a model, pass it to function {@link solve} or to {@link Solver}
  * class.
@@ -4845,7 +4831,7 @@ export class ModelDomains {
  * * {@link le}: less than or equal to.
  * * {@link gt}: greater than.
  * * {@link ge}: greater than or equal to.
- * * {@link identity}: constraints two integer expressions to be equal including the presence status.
+ * * {@link identity}: constraints two integer expressions to be equal, including the presence status.
  *
  * #### Boolean operators
  *
@@ -4862,7 +4848,7 @@ export class ModelDomains {
  * #### Basic constraints on interval variables
  *
  * * {@link alternative}: an alternative between multiple interval variables.
- * * {@link span}: span (cover) of a set of interval variables.
+ * * {@link span}: span (cover) of interval variables.
  * * {@link endBeforeEnd}, {@link endBeforeStart}, {@link startBeforeEnd}, {@link startBeforeStart},
  *   {@link endAtStart}, {@link startAtEnd}: precedence constraints.
  *
@@ -4898,9 +4884,9 @@ export class ModelDomains {
  * @example
  *
  * Our goal is to schedule a set of tasks such that it is finished as soon as
- * possible (i.e. the makespan is minimized).  Each task has a fixed duration and
- * it cannot be interrupted.  Moreover, each tasks needs a certain number of
- * workers to be executed and the total number of workers is limited.
+ * possible (i.e., the makespan is minimized).  Each task has a fixed duration, and
+ * cannot be interrupted.  Moreover, each task needs a certain number of
+ * workers to be executed, and the total number of workers is limited.
  * The input data are generated randomly.
  *
  * ```ts
@@ -4950,8 +4936,8 @@ export class ModelDomains {
  *     console.log("No solution found.");
  *   else {
  *     const solution = result.bestSolution!;
- *     // Note that in evaluation version of the solver, the variable values //
- *     the solution are masked, i.e. they are all _absent_ (`null` in JavaScript).
+ *     // Note that in the evaluation version of the solver, the variable values in
+ *     // the solution are masked, i.e. they are all _absent_ (`null` in JavaScript).
  *     // Objective value is not masked though.
  *     console.log("Solution found with makespan " + solution.getObjective());
  *     for (let task of tasks) {
@@ -4964,8 +4950,8 @@ export class ModelDomains {
  *   }
  *
  * } catch (e) {
- *   // In case of error, CP.solve returns rejected promise.
- *   // Therefore "await CP.solve" throws an exception.
+ *   // In case of error, CP.solve returns a rejected promise.
+ *   // Therefore, "await CP.solve" throws an exception.
  *   console.log("Error: " + (e as Error).message);
  * }
  * ```
@@ -4982,7 +4968,7 @@ export class Model {
     #refs = [];
     #objective;
     #primaryObjectiveExpr;
-    #knownArrays = new WeakMap;
+    #knownArrays = new Map;
     #boolVars = [];
     #intVars = [];
     #floatVars = [];
@@ -5035,7 +5021,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link BoolExpr.or | BoolExpr.or}. */
     or(arg1, arg2) {
@@ -5048,7 +5034,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link BoolExpr.and | BoolExpr.and}. */
     and(arg1, arg2) {
@@ -5061,7 +5047,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link BoolExpr.implies | BoolExpr.implies}. */
     implies(arg1, arg2) {
@@ -5123,7 +5109,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.plus | IntExpr.plus}. */
     plus(arg1, arg2) {
@@ -5134,7 +5120,7 @@ export class Model {
     /**
     * Creates a subtraction of the two integer expressions, i.e. `arg1 + arg2`.@remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.minus | IntExpr.minus}. */
     minus(arg1, arg2) {
@@ -5147,7 +5133,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.times | IntExpr.times}. */
     times(arg1, arg2) {
@@ -5160,7 +5146,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.div | IntExpr.div}. */
     div(arg1, arg2) {
@@ -5192,7 +5178,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5207,7 +5193,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5222,7 +5208,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5237,7 +5223,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5252,7 +5238,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5265,7 +5251,7 @@ export class Model {
     /**
     * Creates Boolean expression `arg1` &ge; `arg2`.
     *
-    * @remarksIf one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * @remarksIf one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5314,7 +5300,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.min2 | IntExpr.min2}. See {@link Model.min | Model.min} for n-ary minimum. */
     min2(arg1, arg2) {
@@ -5327,7 +5313,7 @@ export class Model {
     *
     * @remarks
     *
-    * If one of the arguments has value _absent_ then the resulting expression has also value _absent_.
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Same as {@link IntExpr.max2 | IntExpr.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
     max2(arg1, arg2) {
@@ -5346,7 +5332,7 @@ export class Model {
     *
     * @remarks
     *
-    * Absent arguments are ignored (treated as zeros). Therefore the resulting expression is never _absent_.
+    * Absent arguments are ignored (treated as zeros). Therefore, the resulting expression is never _absent_.
     *
     * Note that binary function {@link Model.plus} handles absent values differently. For example, when `x` is _absent_ then:
     *
@@ -5355,7 +5341,7 @@ export class Model {
     *
     * @example
     *
-    * Let's consider a set of optional tasks. Due to limited resources and time, only some of them can be executed. Every task has a profit and we want to maximize the total profit of the executed tasks.
+    * Let's consider a set of optional tasks. Due to limited resources and time, only some of them can be executed. Every task has a profit, and we want to maximize the total profit from the executed tasks.
     *
     * ```ts
     * // Lengths and profits of the tasks:
@@ -5400,7 +5386,7 @@ export class Model {
     *
     * @example
     *
-    * A common use case is to compute _makespan_ of a set of tasks, i.e. the time when the last task finishes. In the following example, we minimize the makespan of a set of tasks (other parts of the model are not included).
+    * A common use case is to compute _makespan_ of a set of tasks, i.e. the time when the last task finishes. In the following example, we minimize the makespan of a set of tasks (other parts of the model are omitted).
     *
     * ```ts
     * let model = new CP.Model;
@@ -5411,7 +5397,7 @@ export class Model {
     * let makespan = model.max(endTimes);
     * model.minimize(makespan);
     * ```
-    * Notice that when a task is _absent_ (not executed) then its end time is _absent_. And therefore the absent task is not included in the maximum.
+    * Notice that when a task is _absent_ (not executed), then its end time is _absent_. And therefore, the absent task is not included in the maximum.
     *
     * @see Binary {@link Model.max2}.
     * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
@@ -5447,7 +5433,7 @@ export class Model {
     * let startTimes = tasks.map(task => task.start());
     * let firstStartTime = model.min(startTimes);
     * ```
-    * Notice that when a task is _absent_ (not executed) then its end time is _absent_. And therefore the absent task is not included in the minimum.
+    * Notice that when a task is _absent_ (not executed), its end time is _absent_. And therefore, the absent task is not included in the minimum.
     *
     * @see Binary {@link Model.min2}.
     * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
@@ -5663,11 +5649,11 @@ export class Model {
     *
     * @remarks
     *
-    * If the interval is absent then the resulting expression is also absent.
+    * If the interval is absent, the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -5692,11 +5678,11 @@ export class Model {
     *
     * @remarks
     *
-    * If the interval is absent then the resulting expression is also absent.
+    * If the interval is absent, the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -5721,11 +5707,11 @@ export class Model {
     *
     * @remarks
     *
-    * If the interval is absent then the resulting expression is also absent.
+    * If the interval is absent, the resulting expression is also absent.
     *
     * @example
     *
-    * In the following example we constraint interval variable `y` to start after end of `y` with a delay at least 10. In addition we constrain length of `x` to be less or equal than length of `y`.
+    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
     *
     * ```ts
     * let model = new CP.Model;
@@ -5746,7 +5732,7 @@ export class Model {
         return result;
     }
     /**
-    * Creates an integer expression for the start of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -5761,7 +5747,7 @@ export class Model {
         return result;
     }
     /**
-    * Creates an integer expression for the end of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -5776,7 +5762,7 @@ export class Model {
         return result;
     }
     /**
-    * Creates an integer expression for the length of the interval variable. If the interval is absent then its value is `absentValue`.
+    * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
     *
     * @remarks
     *
@@ -5815,7 +5801,7 @@ export class Model {
     *
     * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.endBeforeEnd | IntervalVar.endBeforeEnd}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5840,7 +5826,7 @@ export class Model {
     *
     * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.endBeforeStart | IntervalVar.endBeforeStart}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5865,7 +5851,7 @@ export class Model {
     *
     * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.startBeforeEnd | IntervalVar.startBeforeEnd}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5890,7 +5876,7 @@ export class Model {
     *
     * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.startBeforeStart | IntervalVar.startBeforeStart}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5915,7 +5901,7 @@ export class Model {
     *
     * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.endAtEnd | IntervalVar.endAtEnd}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5940,7 +5926,7 @@ export class Model {
     *
     * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.endAtStart | IntervalVar.endAtStart}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5965,7 +5951,7 @@ export class Model {
     *
     * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.startAtEnd | IntervalVar.startAtEnd}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -5990,7 +5976,7 @@ export class Model {
     *
     * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
     *
-    * When one of the two interval variables is absent then the constraint is satisfied.
+    * When one of the two interval variables is absent, then the constraint is satisfied.
     *
     * @see {@link IntervalVar.startAtStart | IntervalVar.startAtStart}      is equivalent function on {@link IntervalVar}.
     * @see {@link Model.constraint}
@@ -6006,11 +5992,11 @@ export class Model {
     * Creates alternative constraint between interval variables.
     *
     * @param main The main interval variable.
-    * @param options Array of optional interval variables to chose from.
+    * @param options Array of optional interval variables to choose from.
     *
     * @remarks
     *
-    * Alternative constraint is a way to model various kind of alternative choices. For example, we can model a task that could be done by worker A, B, or C. To model such alternative, we use interval variable `main` that represents the task regardless the chosen worker and three interval variables `options = [A, B, C]` that represent the task when done by worker A, B, or C. Interval variables `A`, `B` and `C` should be optional. This way, if e.g. option B is chosen, then `B` will be _present_ and equal to `main` (they will start at the same time and end at the same time), the remaining options A and C will be _absent_.
+    * Alternative constraint is a way to model various kinds of choices. For example, we can model a task that could be done by worker A, B, or C. To model such alternative, we use interval variable `main` that represents the task regardless the chosen worker and three interval variables `options = [A, B, C]` that represent the task when done by worker A, B, or C. Interval variables `A`, `B`, and `C` should be optional. This way, if e.g. option B is chosen, then `B` will be _present_ and equal to `main` (they will start at the same time and end at the same time), the remaining options, A and C, will be _absent_.
     *
     * We may also decide not to execute the `main` task at all (if it is optional). Then `main` will be _absent_ and all options `A`, `B` and `C` will be _absent_ too.
     *
@@ -6022,13 +6008,13 @@ export class Model {
     *
     * @example
     *
-    * Let's consider a task T that can be done by worker A, B, or C. The length of the task and a cost associated with it depends on the chosen worker:
+    * Let's consider task T, which can be done by workers A, B, or C. The length of the task and a cost associated with it depends on the chosen worker:
     *
-    * * If done by worker A then its length is 10 and the cost is 5.
-    * * If done by worker B then its length is 20 and the cost is 2.
-    * * If done by worker C then its length is 3 and the cost is 10.
+    * * If done by worker A, then its length is 10, and the cost is 5.
+    * * If done by worker B, then its length is 20, and the cost is 2.
+    * * If done by worker C, then its length is 3, and the cost is 10.
     *
-    * Each worker can execute only one task at a time. The remaining tasks are omitted in the model below though. The objective could be e.g. to minimize the total cost (also omitted in the model).
+    * Each worker can execute only one task at a time. However, the remaining tasks are omitted in the model below. The objective could be, e.g., to minimize the total cost (also omitted in the model).
     *
     * ```ts
     * let model = new CP.Model;
@@ -6079,14 +6065,14 @@ export class Model {
     * Span constraint is satisfied in one of the following two cases:
     *
     * * Interval variable `main` is absent and all interval variables in `covered` are absent too.
-    * * Interval variable `main` is present, at least on interval in `covered` is present and:
+    * * Interval variable `main` is present, at least one interval in `covered` is present and:
     *
-    *    * `main.start()` is equal to the minimum of starting times of all present intervals in `covered`.
-    *    * `main.end()` is equal to the maximum of ending times of all present intervals in `covered`.
+    *    * `main.start()` is equal to the minimum starting time of all present intervals in `covered`.
+    *    * `main.end()` is equal to the maximum ending time of all present intervals in `covered`.
     *
     * @example
     *
-    * Lets consider composite task `T` that consists of 3 subtasks `T1`, `T2` and `T3`. Subtasks are independent, could be processed in any order and may overlap. However task T is blocking a particular location and no other task can be processed there. The location is blocked as soon as the first task from `T1`, `T2`, `T3` starts and it remains blocked until the last one of them finishes.
+    * Let's consider composite task `T`, which consists of 3 subtasks: `T1`, `T2`, and `T3`. Subtasks are independent, could be processed in any order, and may overlap. However, task T is blocking a particular location, and no other task can be processed there. The location is blocked as soon as the first task from `T1`, `T2`, `T3` starts, and it remains blocked until the last one of them finishes.
     *
     * ```ts
     * let model = new CP.Model;
@@ -6128,7 +6114,7 @@ export class Model {
     *
     * In the solution, the interval which is scheduled first has position 0, the second interval has position 1, etc. The position of an absent interval is `absent`.
     *
-    * The `position` expression cannot be used with interval variables of possibly zero length (because position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
+    * The `position` expression cannot be used with interval variables of possibly zero length (because the position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
     *
     * @see {@link IntervalVar.position | IntervalVar.position} is equivalent function on {@link IntervalVar}.
     * @see {@link Model.noOverlap} for constraints on overlapping intervals.
@@ -6156,19 +6142,19 @@ export class Model {
     *
     * @remarks
     *
-    * Pulse can be used to model resource requirement during an interval variable. The given amount `height` of the resource is used during the whole interval (from its start to end).
+    * Pulse can be used to model resource requirement during an interval variable. The given amount `height` of the resource is used during the whole interval (from start to end).
     *
     * #### Formal definition
     *
-    * Pulse creates a cumulative function which have the value:
+    * Pulse creates a cumulative function which has the value:
     *
     * * `0` before `interval.start()`,
     * * `height` between `interval.start()` and `interval.end()`,
     * * `0` after `interval.end()`
     *
-    * If `interval` is absent then the pulse is `0` everywhere.
+    * If `interval` is absent, then the pulse is `0` everywhere.
     *
-    * Cumulative functions can be combined together using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * :::info
     * Pulses with variable heights (i.e. with `height` given as `IntExpr`) are not supported yet.
@@ -6176,7 +6162,7 @@ export class Model {
     *
     * @example
     *
-    * Lets consider a set of tasks and a group of 3 workers. Each task requires certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
+    * Let's consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
     *
     * ```ts
     * // The input data:
@@ -6228,11 +6214,11 @@ export class Model {
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
     *
     * A `stepAtStart` can be used to change the amount of such resource at the start of a given variable. The amount is changed by the given `height`.
     *
-    * Cumulative steps could be combined together using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -6249,7 +6235,7 @@ export class Model {
     *
     * @example
     *
-    * Lets consider a set of tasks. Each task either costs certain amount of money or makes some money. Money are consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney` and we want to schedule the tasks so that we do not run out of money (i.e. the amount of money is always non-negative).
+    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -6309,11 +6295,11 @@ export class Model {
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
     *
     * A `stepAtEnd` can be used to change the amount of such resource at the end of a given variable. The amount is changed by the given `height`.
     *
-    * Cumulative steps could be combined together using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -6330,7 +6316,7 @@ export class Model {
     *
     * @example
     *
-    * Lets consider a set of tasks. Each task either costs certain amount of money or makes some money. Money are consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney` and we want to schedule the tasks so that we do not run out of money (i.e. the amount of money is always non-negative).
+    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -6390,11 +6376,11 @@ export class Model {
     *
     * @remarks
     *
-    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}, but the time of the change is given by parameter `x` instead of by start/end of an interval variable.
+    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}, but the time of the change is given by parameter `x` instead of by the start/end of an interval variable.
     *
     * #### Formal definition
     *
-    * stepAt creates a cumulative function which has the value:
+    * `stepAt` creates a cumulative function which has the value:
     *
     * * 0 before `x`,
     * * `height` after `x`.
@@ -6469,7 +6455,7 @@ export class Model {
     *
     * @remarks
     *
-    * Computes sum of cumulative functions. The sum can be used e.g. to combine contributions of individual tasks to total resource consumption.
+    * Computes the sum of cumulative functions. The sum can be used, e.g., to combine contributions of individual tasks to total resource consumption.
     *
     * @see {@link cumulPlus}, {@link cumulMinus}, {@link cumulNeg} for other ways to combine cumulative functions.
     *  */
@@ -6483,7 +6469,7 @@ export class Model {
     *
     * @remarks
     *
-    * This function can be used to specify the maximum limit of resource usage at any time. For example to limit number of workers working simultaneously, limit the maximum amount of material on stock etc.
+    * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
     * See {@link Model.pulse} for an example with `cumulLe`.
     *
     * @see {@link CumulExpr.cumulLe | CumulExpr.cumulLe} for the equivalent function on {@link CumulExpr}.
@@ -6545,7 +6531,7 @@ export class Model {
     *
     * @remarks
     *
-    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. That is, the sum includes the function value at the start time, but not the value at the end time. If the interval variable has zero length then the result is 0. If the interval variable is absent then the result is `absent`.
+    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. The sum includes the function value at the start time but not the value at the end time. If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is `absent`.
     *
     * **Requirement**: The step function `func` must be non-negative.
     *
@@ -6567,7 +6553,7 @@ export class Model {
     *
     * @remarks
     *
-    * The result is the value of the step function `func` at the point `arg`. If the value of `arg` is `absent` then the result is also `absent`.
+    * The result is the value of the step function `func` at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
     *
     * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
     *
@@ -6596,10 +6582,10 @@ export class Model {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
     *
     * @see {@link IntervalVar.forbidExtent} for the equivalent function on {@link IntervalVar}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain start/end of an interval variable.
+    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
     * @see {@link Model.stepFunctionEval} for evaluation of a step function.
     *  */
     forbidExtent(interval, func) {
@@ -6618,7 +6604,7 @@ export class Model {
     *   model.constraint(model.ne(model.intStepFunctionEval(func, interval.start()), 0));
     * ```
     *
-    * That is, function value at the start of the interval variable cannot be zero.
+    * I.e., the function value at the start of the interval variable cannot be zero.
     *
     * @see {@link IntervalVar.forbidStart} for the equivalent function on {@link IntervalVar}.
     * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -6640,7 +6626,7 @@ export class Model {
     *   model.constraint(model.ne(model.stepFunctionEval(func, interval.end()), 0));
     * ```
     *
-    * That is, function value at the end of the interval variable cannot be zero.
+    * I.e., the function value at the end of the interval variable cannot be zero.
     *
     * @see {@link IntervalVar.forbidEnd} for the equivalent function on {@link IntervalVar}.
     * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -6789,17 +6775,17 @@ export class Model {
         this._noOverlap(seq, transitions);
     }
     /**
-     * Assigns a name to the model. It overwrites any name that was previously
+     * Assign a name to the model. It overwrites any name that was previously
      * set, e.g. in the {@link Model} constructor.
      *
-     * Naming the model is optional.  The main purpose of the name is to
+     * Naming the model is optional.  The primary purpose of the name is to
      * distinguish between different models during benchmarking (see {@link benchmark}).
      */
     setName(name) {
         this.#name = name;
     }
     /**
-     * Returns the name of the model. When no name was set, returns `undefined`.
+     * Returns the name of the model. When no name was set, it returns `undefined`.
      */
     getName() { return this.#name; }
     constraint(constraint) {
@@ -6963,20 +6949,20 @@ export class Model {
     *
     * Sequence variable is used together with {@link SequenceVar.noOverlap}
     * constraint to model a set of intervals that cannot overlap and so they form
-    * a sequence in the solution. Sequence variable allows to further constrain
-    * this sequence, for example by specifying sequence-dependent minimum
-    * transition times between>
+    * a sequence in the solution. Sequence variable allows us to constrain the sequence further.
+    * For example, by specifying sequence-dependent minimum
+    * transition times.
     *
-    * Types can be used to mark intervals that have similar properties, in
-    * particular they behave the same from the point of view of transition times.
+    * Types can be used to mark intervals with similar properties. In
+    * particular, they behave similarly in terms of transition times.
     * Interval variable `intervals[0]` will have type `type[0]`, `intervals[1]`
     * will have type `type[1]` and so on.
     *
     * If `types` are not specified then `intervals[0]` will have type 0,
-    * `intervals[1]` will have type 1 and so on.
+    * `intervals[1]` will have type 1, and so on.
     *
     * :::info Types
-    * Length of the array `types` must the same as the length of the array
+    * The length of the array `types` must be the same as the length of the array
     * `intervals`.
     *
     * Types should be integer numbers in the range `0` to `n-1` where `n` is the
@@ -7043,16 +7029,16 @@ export class Model {
      * model.constraint(isBefore);
      * ```
      *
-     * In this example the solver sees (propagates) that the minimum start time of
+     * In this example, the solver sees (propagates) that the minimum start time of
      * `y` is 10 and maximum end time of `x` is 90.  Without the constraint over
-     * `presenceOf`, the solver could not propagate that because in this case one
+     * `presenceOf`, the solver could not propagate that because one
      * of the intervals can be _absent_ and the other one _present_ (and so the
      * value of `isBefore` would be _absent_ and the constraint would be
      * satisfied).
      *
-     * In order to achieve good propagation, it is recommended to use binary
-     * constraints over `presenceOf` when possible. E.g. use multiple binary
-     * constraints instead of a single big constraint.
+     * To achieve good propagation, it is recommended to use binary
+     * constraints over `presenceOf` when possible. For example, multiple binary
+     * constraints can be used instead of a single complicated constraint.
      */
     presenceOf(arg) {
         if (IsIntExpr(arg))
@@ -7060,7 +7046,7 @@ export class Model {
         return new BoolExpr(this, "intervalPresenceOf", [GetIntervalVar(arg)]);
     }
     /**
-     * Minimize the provided expression. I.e. search for a solution that achieves the minimal
+     * Minimize the provided expression. I.e., search for a solution that achieves the minimal
      * value of the expression.
      *
      * @param expr The expression to minimize.
@@ -7086,7 +7072,7 @@ export class Model {
         this.#primaryObjectiveExpr = expr;
     }
     /**
-     * Maximize the provided expression. I.e. search for a solution that achieves the maximal
+     * Maximize the provided expression. I.e., search for a solution that achieves the maximal
      * value of the expression.
      *
      * @param expr The expression to maximize.
@@ -7138,7 +7124,7 @@ export class Model {
      *  * $f(x) = y_i$ for $x_i \leq x < x_{i+1}$
      *  * $f(x) = y_n$ for $x \geq x_n$.
      *
-     * Step functions can be used following ways:
+     * Step functions can be used in the following ways:
      *
      *   * Function {@link Model.stepFunctionEval} evaluates the function at the given point (given as {@link IntExpr}).
      *   * Function {@link Model.stepFunctionSum} computes a sum (integral) of the function over an {@link IntervalVar}.
@@ -7229,11 +7215,10 @@ export class Model {
         }
     }
     /** @internal */
-    // TODO:1 I think that even though the array is shared, it is still duplicated in generated JSON. Verify.
     _getIntArray(arg) {
         if (TYPE_CHECK_LEVEL >= 1)
             assert(IsIntArray(arg));
-        return this.#duplicateConstArray(arg);
+        return this.#wrapConstArray(arg);
     }
     /** @internal */
     _getFloatArray(arg) {
@@ -7241,41 +7226,41 @@ export class Model {
             for (const item of arg)
                 assert(typeof item == 'number');
         }
-        return this.#duplicateConstArray(arg);
+        return this.#wrapConstArray(arg);
     }
     /** @internal */
     _getFloatExprArray(arg) {
         if (TYPE_CHECK_LEVEL >= 2)
             assert(Array.isArray(arg));
-        return this.#duplicateExprArray(arg, IsSameFloatExpr, GetFloatExpr);
+        return this.#wrapExprArray(arg, GetFloatExpr);
     }
     /** @internal */
     _getIntExprArray(arg) {
-        return this.#duplicateExprArray(arg, IsSameIntExpr, GetIntExpr);
+        return this.#wrapExprArray(arg, GetIntExpr);
     }
     /** @internal */
     _getBoolExprArray(arg) {
-        return this.#duplicateExprArray(arg, IsSameBoolExpr, GetBoolExpr);
+        return this.#wrapExprArray(arg, GetBoolExpr);
     }
     /** @internal */
     _getIntervalVarArray(arg) {
         VerifyArrayInstanceOf(arg, IntervalVar);
-        return this.#duplicatePureExprArray(arg);
+        return this.#wrapPureExprArray(arg);
     }
     /** @internal */
     _getCumulExprArray(arg) {
         VerifyArrayInstanceOf(arg, CumulExpr);
-        return this.#duplicatePureExprArray(arg);
+        return this.#wrapPureExprArray(arg);
     }
     /** @internal */
     _getSearchDecisionArray(arg) {
         VerifyArrayInstanceOf(arg, SearchDecision);
-        return this.#duplicatePureExprArray(arg);
+        return this.#wrapPureExprArray(arg);
     }
     /** @internal */
     _getSequenceVarArray(arg) {
         VerifyArrayInstanceOf(arg, SequenceVar);
-        return this.#duplicatePureExprArray(arg);
+        return this.#wrapPureExprArray(arg);
     }
     /** @internal */
     _getIntMatrix(arg) {
@@ -7287,33 +7272,12 @@ export class Model {
             for (const item of row)
                 assert(Number.isInteger(item));
         }
-        let copy = this.#knownArrays.get(arg);
-        if (copy !== undefined && copy.length === arg.length) {
-            // We already saw this array once. Verify that it is still the same
-            let same = true;
-            for (const row of arg) {
-                if (row.length != n) {
-                    same = false;
-                    break;
-                }
-                for (let i = 0; i < n; i++) {
-                    if (copy[i] !== row[i]) {
-                        same = false;
-                        break;
-                    }
-                }
-                if (!same)
-                    break;
-            }
-            if (same)
-                return copy;
-        }
-        // Matrix is not known or it has changed. Create a copy and remember it:
-        let newCopy = [];
-        for (const row of arg)
-            newCopy.push([...row]);
-        this.#knownArrays.set(arg, copy);
-        return newCopy;
+        let knownNode = this.#knownArrays.get(arg);
+        if (knownNode !== undefined)
+            return knownNode._getArg();
+        let node = new ArrayNode(this, "matrix", [arg]);
+        this.#knownArrays.set(arg, node);
+        return node._getArg();
     }
     /** @internal */
     _getNewRefId(node) {
@@ -7321,69 +7285,40 @@ export class Model {
         this.#refs.push(node);
         return id;
     }
-    #duplicateConstArray(arg) {
-        let copy = this.#knownArrays.get(arg);
-        if (copy !== undefined && copy.length === arg.length) {
-            // We already saw this array once. Verify that it is still the same
-            let same = true;
-            for (let i = 0; i < arg.length; i++) {
-                if (copy[i] != arg[i]) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same)
-                return copy;
-        }
-        // The array is not known or it has changed. Create a copy and remember it:
-        copy = [...arg];
-        this.#knownArrays.set(arg, copy);
-        return copy;
+    #wrapConstArray(arg) {
+        let knownNode = this.#knownArrays.get(arg);
+        if (knownNode !== undefined)
+            return knownNode._getArg();
+        let node = new ArrayNode(this, "array", arg);
+        this.#knownArrays.set(arg, node);
+        return node._getArg();
     }
-    #duplicatePureExprArray(arg) {
-        let copy = this.#knownArrays.get(arg);
-        if (copy !== undefined && copy.length === arg.length) {
-            // We already saw this array once. Verify that it is still the same
-            let same = true;
-            for (let i = 0; i < arg.length; i++) {
-                // Don't create new references, compare with the current state:
-                if (copy[i] !== arg[i]._getCurrentArg()) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same)
-                return copy;
-        }
-        // The array is not known or it has changed. Create a copy and remember it:
-        copy = [];
+    #wrapPureExprArray(arg) {
+        // For each user array we saw so far, we have an instance of ArrayNode.
+        // This way, if the array is used multiple times, we can reuse it in the same way we reuse standard nodes.
+        let knownNode = this.#knownArrays.get(arg);
+        if (knownNode !== undefined)
+            return knownNode._getArg();
+        // Existing node not found, create one:
+        let nodeArgs = [];
         for (let i = 0; i < arg.length; i++)
-            copy.push(arg[i]._getArg());
-        this.#knownArrays.set(arg, copy);
-        return copy;
+            nodeArgs.push(arg[i]._getArg());
+        let node = new ArrayNode(this, "array", nodeArgs);
+        this.#knownArrays.set(arg, node);
+        return node._getArg();
     }
-    #duplicateExprArray(arg, isSameFunc, argFunc) {
+    #wrapExprArray(arg, argFunc) {
         if (TYPE_CHECK_LEVEL >= 2)
             assert(Array.isArray(arg));
-        let copy = this.#knownArrays.get(arg);
-        if (copy !== undefined && copy.length === arg.length) {
-            // We already saw this array once. Verify that it is still the same
-            let same = true;
-            for (let i = 0; i < arg.length; i++) {
-                if (!isSameFunc(arg[i], copy[i])) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same)
-                return copy;
-        }
-        // The array is not known or it has changed. Create a copy and remember it:
-        copy = [];
+        let knownNode = this.#knownArrays.get(arg);
+        if (knownNode !== undefined)
+            return knownNode._getArg();
+        let nodeArgs = [];
         for (let i = 0; i < arg.length; i++)
-            copy.push(argFunc(arg[i]));
-        this.#knownArrays.set(arg, copy);
-        return copy;
+            nodeArgs.push(argFunc(arg[i]));
+        let node = new ArrayNode(this, "array", nodeArgs);
+        this.#knownArrays.set(arg, node);
+        return node._getArg();
     }
     /**
      * Returns an array of all interval variables in the model.
@@ -7402,10 +7337,10 @@ export class Model {
     }
 }
 /**
- * Solver provides asynchronous communication with the solver.
+ * The solver provides asynchronous communication with the solver.
  *
- * Unlike function {@link solve}, `Solver` allows to process individual events
- * happening during the solve and also stop the solver at any time.  If you're
+ * Unlike function {@link solve}, `Solver` allows the user to process individual events
+ * during the solve and to stop the solver at any time.  If you're
  * interested in the final result only, use {@link solve} instead.
  *
  * To solve a model, create a new `Solver` object and call its method {@link Solver.solve}.
@@ -7422,7 +7357,7 @@ export class Model {
  *   * `summary`: Emits {@link SolveSummary} at the end of the solve.
  *   * `close`: Emits `void`. It is always the last event emitted.
  *
- * The solver output (log, trace and warnings) is printed on console by default,
+ * The solver output (log, trace, and warnings) is printed on the console by default,
  * it can be redirected to a file or a stream or suppressed completely using
  * function {@link redirectOutput}.
  *
@@ -7430,7 +7365,7 @@ export class Model {
  *
  * In the following example, we run a solver asynchronously. We subscribe to
  * the `solution` event to print the objective value of the solution
- * and value of interval variable `x`. After the first solution is found, we request
+ * and the value of interval variable `x`. After finding the first solution, we request
  * the solver to stop.
  * We also subscribe to the `summary` event to print statistics about the solve.
  *
@@ -7503,7 +7438,7 @@ export class Solver extends EventEmitter {
         this.stop("Error in output stream");
     };
     // For type safety, we declared the events that are emitted by this class
-    // above.  Another option is to use interface, then we would an interface,
+    // above.  Another option is to use an interface, then we would an interface,
     // then we would not have to implement the function below.
     // But then typedoc @noInheritDoc does not work.
     on(event, listener) {
@@ -7525,19 +7460,19 @@ export class Solver extends EventEmitter {
      * solver to finish.  During the solve, the solver emits events that can be
      * intercepted (see {@link on}) to execute a code when the event occurs.
      *
-     * Note that JavaScript is single-threaded.  Therefore it cannot communicate
-     * with the solver subprocess while the user code is running.  The user code
+     * Note that JavaScript is single-threaded.  Therefore, it cannot communicate
+     * with the solver subprocess while the user code runs.  The user code
      * must be idle (using `await` or waiting for an event) for the solver to
      * function correctly.
      *
      * Note that function {@link solve} cannot be called only once. If you need to
-     * solve multiple models or run multiple solves in parallel then create multiple
+     * solve multiple models or run multiple solves in parallel, then create multiple
      * `Solver` objects.
      *
      * ### Warm start and external solutions
      *
-     * If `warmStart` parameter is specified then the solver will start with the
-     * given solution.  The solution must be compatible with the model otherwise
+     * If the `warmStart` parameter is specified, the solver will start with the
+     * given solution.  The solution must be compatible with the model; otherwise
      * an error is raised.  The solver will take advantage of the
      * solution to speed up the search: it will search only for better solutions
      * (if it is a minimization or maximization problem). The solver may try to
@@ -7796,7 +7731,7 @@ export class Solver extends EventEmitter {
         }
     }
     /**
-     * Instructs the solver to stop ASAP.
+     * Instruct the solver to stop ASAP.
      *
      * @param reason The reason why to stop. The reason will appear in the log.
      *
@@ -7804,11 +7739,11 @@ export class Solver extends EventEmitter {
      *
      * A stop message is sent to the server asynchronously. The server will
      * stop as soon as possible and will send a summary event and close event.
-     * However, due to asynchronous nature of the communication,
-     * another events may be sent before the summary event (e.g. another solution
+     * However, due to the asynchronous nature of the communication,
+     * other events may be sent before the summary event (e.g., another solution
      * found or a log message).
      *
-     * Requesting stop on a solver that has already stopped has no effect.
+     * Requesting a stop on a solver that has already stopped has no effect.
      *
      * @example
      *
@@ -7842,20 +7777,20 @@ export class Solver extends EventEmitter {
     /**
      * Send an external solution to the solver.
      *
-     * @param solution The solution to send. It must be compatible with the model otherwise an error is raised.
+     * @param solution The solution to send. It must be compatible with the model; otherwise, an error is raised.
      *
      * @remarks
      *
      * This function can be used to send an external solution to the solver, e.g.
-     * found by another solver, a heuristic or a user.  The solver will take
+     * found by another solver, a heuristic, or a user.  The solver will take
      * advantage of the solution to speed up the search: it will search only for
      * better solutions (if it is a minimization or maximization problem). The
      * solver may try to improve the provided solution by Large Neighborhood
      * Search.
      *
      * The solution does not have to be better than the current best solution
-     * found by the solver. It is up to the solver whether it will use the
-     * solution in this case or not.
+     * found by the solver. It is up to the solver whether or not it will use the
+     * solution in this case.
      *
      * Sending a solution to a solver that has already stopped has no effect.
      *
@@ -7882,7 +7817,7 @@ export class Solver extends EventEmitter {
      *
      * Normally, Solver writes log, trace, and warning messages to its standard
      * output. This function allows to redirect those messages to another stream
-     * (e.g., a file) or suppress them completely.
+     * (e.g., a file) or suppress them entirely.
      *
      * Note that besides writing the messages to the standard output, the solver
      * also emits events for log, trace, and warning messages. Those events can be
@@ -7920,15 +7855,14 @@ export class Solver extends EventEmitter {
      *
      * This function returns `true` if the solving process has finished.  Due to
      * asynchronicity, the solver may still emit a few events such as `close`.
-     * However when this function returns `true` then the solver ignores all
-     * further commands, in particular {@link stop} or {@link sendSolution}.
-     *
+     * However, when this function returns `true`, the solver ignores all
+     * further commands, particularly {@link stop} or {@link sendSolution}.
      */
     _hasFinished() {
         return this.#initialized && (this.#closeExpected || !this.#solver.stdin.writable);
     }
     #sendMessage(msg) {
-        // The function `write` does not wait, it writes into internal buffer which
+        // The function `write` does not wait; it writes into the internal buffer, which
         // is fed into the solver process asynchronously.
         if (this.#solver.stdin.writable)
             this.#solver.stdin.write(JSON.stringify(msg) + '\n');
@@ -7944,20 +7878,20 @@ export class Solver extends EventEmitter {
  * @param model The model to solve.
  * @param params The parameters to use for solving.
  * @param warmStart The solution to start with.
- * @param log The stream to which the solver output (log, trace and warnings)
- *            should be redirected. When undefined then the output is printed
- *            on standard output. When null then the output is suppressed.
+ * @param log The stream to which the solver output (log, trace, and warnings)
+ *            should be redirected. When undefined, then the output is printed
+ *            on standard output. When null, then the output is suppressed.
  * @returns The result of the solve.
  *
  * @remarks
  *
- * This function is asynchronous and returns a promise. Use e.g., `await` to wait
- * for the result.  When an error occurs, then the returned promise is rejected
- * and standard `Error` object is returned.
+ * This function is asynchronous and returns a promise. Use, e.g., `await` to wait
+ * for the result.  When an error occurs, then the returned promise is rejected,
+ * and the standard `Error` object is returned.
  *
- * If `warmStart` parameter is specified then the solver will start with the
- * given solution.  The solution must be compatible with the model, otherwise
- * an error is raised.  The solver will take advantage of the
+ * If the `warmStart` parameter is specified, the solver will start with the
+ * given solution.  The solution must be compatible with the model; otherwise,
+ * an error will be raised.  The solver will take advantage of the
  * solution to speed up the search: it will search only for better solutions
  * (if it is a minimization or maximization problem). The solver may also try to
  * improve the provided solution by Large Neighborhood Search.
@@ -7966,7 +7900,7 @@ export class Solver extends EventEmitter {
  * instead.  E.g., to process every solution found or to send external solutions
  * to the solver
  *
- * For an example of using this function see {@link Model}.
+ * For an example of using this function, see {@link Model}.
  *
  * @category Solving
  */
@@ -7979,7 +7913,7 @@ export async function solve(model, params, warmStart, log) {
 /**
  * Translates a problem definition into a JSON format.
  *
- * @param problem The problem to be exported.
+ * @param problem The problem to export.
  * @returns A string containing the problem in JSON format.
  *
  * @remarks
@@ -8030,41 +7964,41 @@ export async function _toText(model, cmd, params, warmStart, log = process.stdou
     return result;
 }
 /**
- * Converts a problem into a text format similar to IBM CP Optimizer file format.
- * The result is human readable and can be stored in a file.
+ * Converts a problem into a text format similar to the IBM CP Optimizer file format.
+ * The result is human-readable and can be stored in a file.
  *
  * @param model The model to be exported.
  * @param params The parameters to pass to the solver (they are mostly unused).
  * @param warmStart An initial solution to start the solver with.
  * @param log The stream to which the solver output should be redirected.
- *            When `undefined` then the output is printed to the standard output.
- *            When `null` then the output is suppressed.
+ *            When `undefined`, the output is printed to the standard output.
+ *            When `null`, the output is suppressed.
  * @returns A string containing the model in text format.
  *
  * @remarks
  * Unlike JSON format, there is no way to convert the text format back into an
  * instance of {@link Model}.
  *
- * The result so similar to the file format used by IBM CP Optimizer that, under
+ * The result is so similar to the file format used by IBM CP Optimizer that, under
  * some circumstances, the result can be used as an input file for CP Optimizer.
- * However there are some differences between OptalCP and CP Optimizer that makes
+ * However, some differences between OptalCP and CP Optimizer make
  * it impossible to make sure the result is always valid for CP Optimizer.
  * Known issues are:
  *
  * * OptalCP supports optional integer expressions, while CP Optimizer does not.
  *   If the model contains optional integer expressions, the result will not be
- *   valid for CP Optimizer or it will be badly interpreted.  For example, in
- *   order to get valid CP Optimizer file, don't use function {@link
+ *   valid for CP Optimizer or badly interpreted.  For example, in
+ *   order to get a valid CP Optimizer file, don't use function {@link
  *   IntervalVar.start}, use {@link IntervalVar.startOr} instead.
  * * For the same reason, prefer precedence constraints such as
  *   {@link Model.endBeforeStart} over `constraint(x.end().le(y.start()))`.
- * * Negative heights in cumulative expressions (e.g. in {@link
+ * * Negative heights in cumulative expressions (e.g., in {@link
  *   Model.stepAtStart}) are not supported by CP Optimizer.
  *
- * The function is using OptalCP solver for the conversion, therefore it is
- * asynchronous. To wait the result, use `await` keyword.
+ * The function uses OptalCP solver for the conversion. Therefore, it is
+ * asynchronous. To wait for the result, use the `await` keyword.
  *
- * In case of an error this function returns a rejected promise.
+ * In case of an error, this function returns a rejected promise.
  *
  * @category Model exporting
  */
@@ -8072,24 +8006,24 @@ export async function problem2txt(model, params, warmStart, log) {
     return _toText(model, "toText", params, warmStart, log);
 }
 /**
- * Converts a problem into equivalent JavaScript code. The result is human readable.
+ * Converts a problem into equivalent JavaScript code. The result is human-readable.
  *
  * @param model The model to be exported.
  * @param params The parameters to pass to the solver (they are included in the generated code).
  * @param warmStart An initial solution to start the solver with.
  * @param log The stream to which the solver output should be redirected.
- *            When `undefined` then the output is printed to the standard output.
- *            When `null` then the output is suppressed.
+ *            When `undefined`, the output is printed to the standard output.
+ *            When `null`, the output is suppressed.
  * @returns A string containing the model in JavaScript format.
  *
  * @remarks
- * This function is experimental and the result is not guaranteed to be valid.
+ * This function is experimental, and the result is not guaranteed to be valid.
  *
  * The result of this function can be stored in a file and executed using
  * Node.js.  It is meant as a way to export a model to a format that is
- * executable, human readable, editable and independent of other libraries.
+ * executable, human-readable, editable, and independent of other libraries.
  *
- * In case of an error this function returns a rejected promise.
+ * In case of an error, this function returns a rejected promise.
  *
  * @category Model exporting
  * @experimental
@@ -8105,37 +8039,37 @@ export async function problem2js(model, params, warmStart, log) {
  * @param model The model to propagate.
  * @param parameters The parameters to use for propagation.
  * @param log The stream to which the solver output should be redirected. When
- *            `undefined` then the output is printed to the standard output. When `null`
- *            then the output is suppressed.
+ *            `undefined`, then the output is printed to the standard output.
+ *            When `null`, the output is suppressed.
  * @returns The result of propagation.
  *
  * @remarks
  *
  * Propagation removes infeasible values from variable domains.
- * In general, it shrinks the domains but it doesn't fix variables to values.
- * In some cases propagation can prove that the model is infeasible.
+ * Generally, it shrinks the domains but doesn't fix variables to values.
+ * In some cases, propagation can prove that the model is infeasible.
  *
- * Sometimes it may be useful to check what the solver can compute
+ * Sometimes, it may be helpful to check what the solver can compute
  * by constraint propagation and what it cannot. For example,
  * if some obviously infeasible values are not removed from
- * variable domains then some redundant constraint can be added.
+ * variable domains, then some redundant constraints can be added.
  *
  * @example
  *
  * In the following example, we have 4 tasks `task[0]`, `task[1]`, `task[2]`,
  * `task[3]`, and 2 workers.  Each task can be assigned to any worker and the
- * tasks can be processed in any order. All tasks have length 10 and must finish
+ * tasks can be processed in any order. All tasks have a length 10 and must be finished
  * before time 19.
  *
- * In the first model we will use constraints {@link Model.alternative} to
- * chose a worker for each tasks.  And we check that constraint propagation
+ * In the first model, we will use constraints {@link Model.alternative} to
+ * choose a worker for each task.  We check that constraint propagation
  * correctly propagates the length of the tasks to the workers.
  *
  * ```ts
  * let model = new CP.Model();
  * const nbTasks = 4;
  *
- * // For each task we will create three interval variables:
+ * // For each task, we will create three interval variables:
  * //   * tasks[i]: the task itself
  * //   * tasksWorker1[i]: the task if executed by worker1
  * //   * tasksWorker2[i]: the task if executed by worker2
@@ -8144,7 +8078,7 @@ export async function problem2js(model, params, warmStart, log) {
  * let tasksWorker2: CP.IntervalVar[] = [];
  *
  * for (let i = 0; i < nbTasks; i++) {
- *   // Create the task itself. It has length 10 and must finish before 19:
+ *   // Create the task itself. It has a length 10 and must be finished before 19:
  *   tasks.push(model.intervalVar({ name: "Task" + (i + 1), length: 10, end: [, 19] }));
  *   // Create the variables for workers. Those variables are optional
  *   // since we don't know which worker will execute the task.
@@ -8154,7 +8088,7 @@ export async function problem2js(model, params, warmStart, log) {
  *   // Alternative constraint between the task and the two worker variables
  *   // makes sure that exactly one of the two workers executes the task:
  *   model.alternative(tasks[i], [tasksWorker1[i], tasksWorker2[i]]);
- *   // All tasks must finish before the time 19:
+ *   // All tasks must be finished before the time 19:
  *   model.constraint(model.le(tasks[i].end(), 19));
  * }
  *
@@ -8167,16 +8101,16 @@ export async function problem2js(model, params, warmStart, log) {
  *   // Propagate using the maximum propagation on noOverlap constraint:
  *   let result = await CP.propagate(model, { noOverlapPropagationLevel: 4 });
  *   if (typeof result.domains === "string") {
- *     // The model is infeasible or a timeout occurred:
+ *     // The model is infeasible, or a timeout occurred:
  *     console.log("The result of the propagation is: " + result.domains);
  *   } else {
- *     // Check computed length of one of the optional tasks:
+ *     // Check the computed length of one of the optional tasks:
  *     console.log("Length of Task1Worker1 is: " +
  *       result.domains.getLengthMin(tasksWorker1[0]) + ".." + result.domains.getLengthMax(tasksWorker1[0]));
  *   }
  *
  * } catch (e) {
- *   // In case of an error CP.propagate returns a rejected promise so an exception is thrown
+ *   // In case of an error CP.propagate returns a rejected promise, so an exception is thrown
  *   console.log("Error caught: " + e);
  * }
  * ```
@@ -8188,24 +8122,24 @@ export async function problem2js(model, params, warmStart, log) {
  * ```
  *
  * As we can see, the length 10 is correctly propagated from `Task1` to `Task1Worker1`.
- * However propagation did not prove that the model is infeasible: there is no way
+ * However, propagation did not prove the model is infeasible, even though there is no way
  * to execute four tasks of length 10 before time 19 using only 2 workers.
  *
  * Let's remodel this problem using a cumulative constraint. The idea is that
- * the workers are interchangeable and we can assign tasks to workers in
+ * the workers are interchangeable, and we can assign tasks to workers in
  * postprocessing.
  *
  * ```ts
  * let model = new CP.Model();
  * const nbTasks = 4;
  *
- * // For each task we will create an interval variable
+ * // For each task, we will create an interval variable
  * // and also a pulse for cumulative constraint:
  * let tasks: CP.IntervalVar[] = [];
  * let pulses: CP.CumulExpr[] = [];
  *
  * for (let i = 0; i < nbTasks; i++) {
- *   // Create the task. It has length 10 and must finish before 19:
+ *   // Create the task. It has a length 10 and must be finished before 19:
  *   tasks.push(model.intervalVar({ name: "Task" + (i + 1), length: 10, end: [, 19] }));
  *   // And its pulse:
  *   pulses.push(tasks[i].pulse(1));
@@ -8219,24 +8153,24 @@ export async function problem2js(model, params, warmStart, log) {
  *   // Propagate using the maximum propagation for cumul constraints:
  *   let result = await CP.propagate(model, { cumulPropagationLevel: 3});
  *   if (typeof result.domains === "string") {
- *     // The model is infeasible or a timeout occurred:
+ *     // The model is infeasible, or a timeout occurred:
  *     console.log("The result of the propagation is: " + result.domains);
  *   } else
  *     console.log("The propagation did not detect infeasibility.");
  *
  * } catch (e) {
- *   // In case of an error CP.propagate returns a rejected promise so an exception is thrown
+ *   // In case of an error, CP.propagate returns a rejected promise, so an exception is thrown
  *   console.log("Error caught: " + e);
  * }
  * ```
  *
- * This time the output is:
+ * This time, the output is:
  *
  * ```text
  * The result of the propagation is: infeasible
  * ```
  *
- * As we can see, this model propagates more then the previous one.
+ * As we can see, this model propagates more than the previous one.
  *
  * @category Propagation
  */
@@ -8270,7 +8204,7 @@ export async function propagate(model, parameters, log) {
 /**
  * @internal
  * Auxiliary class for Benchmarker. Holds statistics about a single feature,
- * like number of branches.
+ * like a number of branches.
  */
 class StatsHolder {
     size = 0;
@@ -8385,7 +8319,7 @@ function parseBenchParameters(params, args) {
     }
 }
 /** @internal
- * Note, the following parameter is not documented. It is functional only for internal builds:
+ * Note that the following parameter is not documented. It is functional only for internal builds:
   "  --exportDomains fileNamePattern  Export domains after the propagate into a text file\n" +
  *
 */
@@ -8396,7 +8330,7 @@ export const BenchmarkParametersHelp =
     "  --nbParallelRuns uint32 Run given number of solves in parallel\n" +
     "  --minObjective double   Require given minimum objective value\n" +
     "  --maxObjective double   Require given maximum objective value\n" +
-    "  --dontSolve             Not really solve. Useful e.g., with --exportJSON\n" +
+    "  --dontSolve             Not really solve. Useful, e.g., with --exportJSON\n" +
     "\n" +
     "Overall benchmarking output:\n" +
     "  --output fileName      Write detailed results of all runs into a JSON file\n" +
@@ -8427,7 +8361,7 @@ export const BenchmarkParametersHelp =
  *
  * @remarks
  *
- * This function parses command line arguments. In case of an error
+ * This function parses command line arguments. In case of an error,
  * it prints an error message and terminates the program. The default
  * parameters can be specified using the parameter `params`.
  *
@@ -8442,7 +8376,7 @@ export const BenchmarkParametersHelp =
  *   --nbParallelRuns uint32 Run given number of solves in parallel
  *   --minObjective double   Require given minimum objective value
  *   --maxObjective double   Require given maximum objective value
- *   --dontSolve             Not really solve. Useful e.g., with --exportJSON
+ *   --dontSolve             Not really solve. Useful, e.g., with --exportJSON
  *
  * Overall benchmarking output:
  *   --output fileName      Write detailed results of all runs into a JSON file
@@ -8472,7 +8406,7 @@ export const BenchmarkParametersHelp =
  *   --logLevel uint32                Level of the log
  *   --warningLevel uint32            Level of warnings
  *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, correctness of solutions is verified
+ *   --verifySolutions bool           When on, the correctness of solutions is verified
  *
  * ...
  * ```
@@ -8554,7 +8488,7 @@ class Benchmarker {
     constructor(generator, inputs, benchmarkParameters) {
         this.#generator = generator;
         this.#parameters = benchmarkParameters;
-        // Modifications that will be done on parameters of each run.
+        // Modifications that will be done on the parameters of each run.
         // I.e. strip BenchmarkParameters to Parameters:
         this.#modifications = copyParameters(benchmarkParameters);
         delete this.#modifications.nbSeeds;
@@ -9121,7 +9055,7 @@ class Benchmarker {
 //        same period as log period in the search.
 //        It is possible to draw on screen using readline.cursorTo.
 /**
- * Benchmark given model or a set of models.
+ * Benchmark the given model or a set of models.
  *
  * @param problemGenerator A function that takes an input and returns a
  *                         {@link ProblemDefinition} or a {@link Model}.
@@ -9135,13 +9069,13 @@ class Benchmarker {
  * This function is used to run benchmarks of the solver. It can be used to
  * solve a single model or multiple models. The models can be generated from
  * data files, or they can be generated on the fly. The function can also
- * export the models into JSON, JavaScript or text formats.
+ * export the models into JSON, JavaScript, or text formats.
  *
  * The function will call the given `problemGenerator` for each input in the
- * array `inputs`.  The input can be anything, it is up to the problem generator
- * to interpret it (it could be e.g. a name of a data file).  The problem
+ * array `inputs`.  The input can be anything; it is up to the problem generator
+ * to interpret it (it could be, e.g., a name of a a file).  The problem
  * generator should return either a {@link Model} or a {@link ProblemDefinition}
- * (a model with parameters and warm start).  Then the function will solve the
+ * (a model with parameters and a warm start).  Then, the function will solve the
  * model and return an array of results.
  *
  * Using {@link BenchmarkParameters} it is possible to specify additional
@@ -9150,43 +9084,43 @@ class Benchmarker {
  * * Each problem can be solved multiple times with different random
  *   random seeds (using parameter
  *   {@link BenchmarkParameters.nbSeeds | BenchmarkParameters.nbSeeds}).
- *   This is useful to get more reliable statistics about the problem performance.
+ *   This is useful for getting more reliable statistics about the problem's performance.
  * * Multiple models can be solved in parallel to speed up the
  *   computation (using parameter
  *   {@link BenchmarkParameters.nbParallelRuns |
- *   BenchmarkParameters.nbParallelRuns}). In this case it is useful to limit
+ *   BenchmarkParameters.nbParallelRuns}). In this case, it is useful to limit
  *   the  number of threads for each solve by parameter
  *   {@link Parameters.nbWorkers | Parameters.nbWorkers}.
  * * The function can also output the results in CSV or JSON formats
- *   or export the models into JSON, JavaScript or text formats.
+ *   or export the models into JSON, JavaScript, or text formats.
  *
  * See {@link BenchmarkParameters} for more details.
  *
  * If multiple models are solved (or one model with multiple seeds), this
- * function suppresses the normal output and instead it prints a table with
+ * function suppresses the normal output, and instead, it prints a table with
  * statistics of the runs. The table is printed on the standard output.
  *
- * If the array `inputs` is empty then the function writes an error message
+ * If the array `inputs` is empty, the function writes an error message
  * to the standard output and terminates the program with exit code 1.
  *
  * In case of an error during solve, the function does not throw an exception
  * but returns {@link ErrorBenchmarkResult} for the given run.
  *
  * As {@link BenchmarkParameters} are an extension of {@link Parameters},
- * the parameter `params` can be used to overwrite parameters for all solves.
+ * the parameter `params` can overwrite parameters for all solves.
  * If `problemGenerator` returns a {@link ProblemDefinition}, then the
- * parameters from the problem definition are used as a base and the parameters
+ * parameters from the problem definition are used as a base, and the parameters
  * from `params` are used to overwrite them (using {@link combineParameters}).
  *
  * @example
  *
- * Let's suppose that we have a function `createModel` that takes a filename as
+ * Suppose we have a function `createModel` that takes a filename as
  * a parameter and returns {@link Model}. For example, the function can model
- * jobshop problem and read the data from a file.
+ * the jobshop problem and read the data from a file.
  *
  * We are going to create a command line application around `createModel`
- * that allows to solve multiple models, using multiple random seeds,
- * run benchmarks in parallel, store results in files etc.
+ * that allows solving multiple models, using multiple random seeds,
+ * run benchmarks in parallel, store results in files, etc.
  *
  * ```ts
  * import * as CP from '@scheduleopt/optalcp';
@@ -9209,7 +9143,7 @@ class Benchmarker {
  * CP.benchmark(createModel, filenames, params);
  * ```
  *
- * The resulting program can be used for example as follows:
+ * The resulting program can be used, for example, as follows:
  *
  * ```shell
  * node mybenchmark.js --nbParallelRuns 2 --nbWorkers 2 --worker0.noOverlapPropagationLevel 4 \
@@ -9236,6 +9170,4 @@ export async function benchmark(problemGenerator, inputs, params) {
     let benchmarker = new Benchmarker(problemGenerator, inputs, params);
     return benchmarker.run();
 }
-// modelGenerator, inputs, benchmarkParams
-// problemGenerator, inputs, benchmarkParams
 //# sourceMappingURL=index.js.map
