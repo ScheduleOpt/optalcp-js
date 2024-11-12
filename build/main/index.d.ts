@@ -14,7 +14,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export declare const Version = "2024.11.0";
+export declare const Version = "2024.11.1";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -198,8 +198,18 @@ export declare abstract class ModelNode {
 /**
  * @internal
  */
+declare class Blank extends ModelNode {
+    #private;
+    /** @internal */
+    constructor(cp: Model, func: string, args: Array<Argument>);
+}
+/**
+ * @internal
+ */
 declare class Constraint extends ModelNode {
     #private;
+    /** @internal */
+    constructor(cp: Model, func: string, args: Array<Argument>);
 }
 /**
  * A class representing floating-point expression in the model.
@@ -672,7 +682,37 @@ export declare class BoolExpr extends IntExpr {
 export declare class Objective extends ModelNode {
     #private;
 }
-/** @internal */
+/**
+ * Integer variable represents an unknown (integer) value that solver has to find.
+ *
+ * The value of the integer variable can be constrained using mathematical expressions, such as {@link Model.plus}, {@link Model.times}, {@link Model.le}, {@link Model.sum}.
+ *
+ * OptalCP solver focuses on scheduling problems and concentrates on {@link IntervalVar} variables.
+ * Therefore, interval variables should be the primary choice for modeling in OptalCP.
+ * However, integer variables can be used for other purposes, such as counting or indexing.
+ * In particular, integer variables can be helpful for cumulative expressions with variable heights; see {@link Model.pulse}, {@link Model.stepAtStart}, {@link Model.stepAtEnd}, and {@link Model.stepAt}.
+ *
+ * The integer variable can be optional.
+ * In this case, the solver can make the variable absent, which is usually interpreted as the fact that the solver does not use the variable at all.
+ * Functions {@link Model.presenceOf} and {@link IntExpr.presence} can constrain the presence of the variable.
+ *
+ * Integer variables can be created using the function {@link Model.intVar | Model.intVar}.
+ *
+ * @example
+ *
+ * In the following example we create three interval variables `x`, `y` and `z`.
+ * Variables `x` and `y` are present, but variable `z` is optional.
+ * Each variable has a different range of possible values.
+ *
+ * ```ts
+ * let model = CP.Model;
+ * let x = model.intervalVar({ name: "x", range: [1, 3] });
+ * let y = model.intervalVar({ name: "y", range: [0, 100] });
+ * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
+ * ```
+ *
+ * @category Modeling
+ */
 export declare class IntVar extends IntExpr {
     /** @internal */
     constructor(cp: Model);
@@ -763,7 +803,7 @@ export declare class BoolVar extends BoolExpr {
  * and we make sure that they don't overlap.  Then, we minimize the maximum of
  * the end times of the three intervals (the makespan):
  * ```ts
- * let model = CP.Model();
+ * let model = new CP.Model;
  * let x = model.intervalVar({ length: 10, name: "x" });
  * let y = model.intervalVar({ length: 10, name: "y" });
  * let z = model.intervalVar({ length: 10, name: "z" });
@@ -785,7 +825,7 @@ export declare class BoolVar extends BoolExpr {
  * `X` and the present interval are equal.
  *
  * ```ts
- * let model = CP.Model();
+ * let model = new CP.Model;
  * let X = model.intervalVar({ length: 10, name: "X" });
  * let XA = model.intervalVar({ name: "XA", optional: true });
  * let XB = model.intervalVar({ name: "XB", optional: true });
@@ -1459,21 +1499,24 @@ export declare class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function is the same as {@link Model.pulse | Model.pulse}. */
+    * This function is the same as {@link Model.pulse | Model.pulse}.
+    *  */
     pulse(height: IntExpr | number): CumulExpr;
     /**
     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
     *
     * @remarks
     *
-    * This function is the same as {@link Model.stepAtStart | Model.stepAtStart}. */
+    * This function is the same as {@link Model.stepAtStart | Model.stepAtStart}.
+    *  */
     stepAtStart(height: IntExpr | number): CumulExpr;
     /**
     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
     *
     * @remarks
     *
-    * This function is the same as {@link Model.stepAtEnd | Model.stepAtEnd}. */
+    * This function is the same as {@link Model.stepAtEnd | Model.stepAtEnd}.
+    *  */
     stepAtEnd(height: IntExpr | number): CumulExpr;
     /** @internal */
     _precedenceEnergyBefore(others: IntervalVar[], heights: number[], capacity: number): void;
@@ -1529,6 +1572,8 @@ export declare class IntervalVar extends ModelNode {
     forbidEnd(func: IntStepFunction): void;
     /** @internal */
     _disjunctiveIsBefore(y: IntervalVar): BoolExpr;
+    /** @internal */
+    _related(y: IntervalVar): void;
 }
 /**
  * Models a sequence (order) of interval variables.
@@ -2620,6 +2665,46 @@ export type WorkerParameters = {
     * The default value is `0`.
     */
     _lnsPortionHandicapInitialQ?: number;
+    /**
+    *  @internal
+    * How to choose neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes an unsigned integer value  in range `0..2`.
+    * The default value is `0`.
+    */
+    _lnsNeighborhoodStrategy?: number;
+    /**
+    *  @internal
+    * Probability to chose neighborhoods randomly.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.2`.
+    */
+    _lnsNeighborhoodEpsilon?: number;
+    /**
+    *  @internal
+    * Learning coefficient for neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.1`.
+    */
+    _lnsNeighborhoodAlpha?: number;
+    /**
+    *  @internal
+    * Initial Q-values of neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `1`.
+    */
+    _lnsNeighborhoodInitialQ?: number;
     /**
     *  @internal
     * How many dives before switching to normal LNS.
@@ -3946,6 +4031,46 @@ export type Parameters = {
     _lnsPortionHandicapInitialQ?: number;
     /**
     *  @internal
+    * How to choose neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes an unsigned integer value  in range `0..2`.
+    * The default value is `0`.
+    */
+    _lnsNeighborhoodStrategy?: number;
+    /**
+    *  @internal
+    * Probability to chose neighborhoods randomly.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.2`.
+    */
+    _lnsNeighborhoodEpsilon?: number;
+    /**
+    *  @internal
+    * Learning coefficient for neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.1`.
+    */
+    _lnsNeighborhoodAlpha?: number;
+    /**
+    *  @internal
+    * Initial Q-values of neighborhoods.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `1`.
+    */
+    _lnsNeighborhoodInitialQ?: number;
+    /**
+    *  @internal
     * How many dives before switching to normal LNS.
     *
     * blah blah
@@ -4778,7 +4903,7 @@ export declare class ModelDomains {
  *
  * #### Variables
  *
- * Interval variables can be created by function {@link intervalVar}.
+ * Interval variables can be created by function {@link intervalVar}, integer variables by function {@link intVar}.
  *
  * #### Basic integer expressions
  *
@@ -4837,6 +4962,7 @@ export declare class ModelDomains {
  *
  *  * {@link sequenceVar}: sequence variable over a set of interval variables.
  *  * {@link noOverlap}: constraints a set of interval variables to not overlap (possibly with transition times).
+ *  * {@link position}: returns the position of an interval variable in a sequence.
  *
  * #### Basic cumulative expressions
  *
@@ -5749,11 +5875,12 @@ export declare class Model {
     /** @internal */
     _sameSequenceGroup(sequences: SequenceVar[]): void;
     /**
+    *
     * Creates cumulative function (expression) _pulse_ for the given interval variable and height.
     *
     * @remarks
     *
-    * Pulse can be used to model resource requirement during an interval variable. The given amount `height` of the resource is used during the whole interval (from start to end).
+    * Pulse can be used to model a resource requirement during an interval variable. The given amount `height` of the resource is used throughout the interval (from start to end).
     *
     * #### Formal definition
     *
@@ -5763,17 +5890,17 @@ export declare class Model {
     * * `height` between `interval.start()` and `interval.end()`,
     * * `0` after `interval.end()`
     *
-    * If `interval` is absent, then the pulse is `0` everywhere.
+    * If `interval` is absent, the pulse is `0` everywhere.
     *
-    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
     *
-    * :::info
-    * Pulses with variable heights (i.e. with `height` given as `IntExpr`) are not supported yet.
-    * :::
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the pulse is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * @example
     *
-    * Let's consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
+    * Let us consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
     *
     * ```ts
     * // The input data:
@@ -5811,21 +5938,61 @@ export declare class Model {
     * let result = await CP.solve(model, { searchType: "FDS" });
     * ```
     *
+    * @example
+    *
+    * In the following example, we create three interval variables `x`, `y`, and `z` that represent some tasks. Variables `x` and `y` are present, but variable `z` is optional. Each task requires a certain number of workers. The length of the task depends on the assigned number of workers. The number of assigned workers is modeled using integer variables `workersX`, `workersY`, and `workersZ`.
+    *
+    * There are 7 workers. Therefore, at any time, the sum of the workers assigned to the running tasks must be less or equal to 7.
+    *
+    * If the task `z` is absent, then the variable `workersZ` has no meaning, and therefore, it should also be absent.
+    *
+    * ```ts
+    * let model = CP.Model;
+    * let x = model.intervalVar({ name: "x" });
+    * let y = model.intervalVar({ name: "y" });
+    * let z = model.intervalVar({ name: "z", optional: true });
+    *
+    * let workersX = model.intVar({ range: [1, 5], name: "workersX" });
+    * let workersY = model.intVar({ range: [1, 5], name: "workersY" });
+    * let workersZ = model.intVar({ range: [1, 5], name: "workersZ", optional: true });
+    *
+    * // workersZ is present if an only if z is present:
+    * model.constraint(z.presence().eq(workersZ.presence()));
+    *
+    * let pulseX = model.pulse(x, workersX);
+    * let pulseY = model.pulse(y, workersY);
+    * let pulseZ = model.pulse(z, workersZ);
+    *
+    * // There are at most 7 workers at any time:
+    * model.cumulSum([pulseX, pulseY, pulseZ]).cumulLe(7);
+    *
+    * // Length of the task depends on the number of workers using the following formula:
+    * //    length * workersX = 12
+    * model.constraint(x.length().times(workersX).eq(12));
+    * model.constraint(y.length().times(workersY).eq(12));
+    * model.constraint(z.length().times(workersZ).eq(12));
+    * ```
+    *
     * @see {@link IntervalVar.pulse | IntervalVar.pulse} is equivalent function on {@link IntervalVar}.
     * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt} for other basic cumulative functions.
     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
     *  */
     pulse(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
+    *
     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
     *
-    * A `stepAtStart` can be used to change the amount of such resource at the start of a given variable. The amount is changed by the given `height`.
+    * A `stepAtStart` can change the amount of such resource at the start of a given variable. The amount is changed by the given `height`, which can be positive or negative.
     *
-    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+    *
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -5834,7 +6001,7 @@ export declare class Model {
     * * `0` before `interval.start()`,
     * * `height` after `interval.start()`.
     *
-    * If `interval` is _absent_ then the created cumulative function is `0` everywhere.
+    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
     *
     * :::info
     * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
@@ -5842,7 +6009,7 @@ export declare class Model {
     *
     * @example
     *
-    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -5894,15 +6061,20 @@ export declare class Model {
     *  */
     stepAtStart(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
+    *
     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
     *
-    * A `stepAtEnd` can be used to change the amount of such resource at the end of a given variable. The amount is changed by the given `height`.
+    * A `stepAtEnd` can change the amount of such resource at the end of a given variable. The amount is changed by the given `height`, which can be positive or negative.
     *
-    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+    *
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -5911,7 +6083,7 @@ export declare class Model {
     * * `0` before `interval.end()`,
     * * `height` after `interval.end()`.
     *
-    * If `interval` is _absent_ then the created cumulative function is `0` everywhere.
+    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
     *
     * :::info
     * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
@@ -5919,7 +6091,7 @@ export declare class Model {
     *
     * @example
     *
-    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -5971,11 +6143,11 @@ export declare class Model {
     *  */
     stepAtEnd(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
-    * Creates cumulative function (expression) that changes value at `x` by the given `height`.
+    * Creates cumulative function (expression) that changes value at `x` by the given `height`. The height can be positive or negative, and it can be given by a constant or an expression (for example, by {@link Model.intVar}).
     *
     * @remarks
     *
-    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}, but the time of the change is given by parameter `x` instead of by the start/end of an interval variable.
+    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}. However, the time of the change is given by the constant value `x` instead of by the start/end of an interval variable.
     *
     * #### Formal definition
     *
@@ -6200,6 +6372,8 @@ export declare class Model {
     _decisionOptionalEndLT(variable: IntervalVar, bound: number, isLeft: boolean): SearchDecision;
     /** @internal */
     _noGood(decisions: SearchDecision[]): void;
+    /** @internal */
+    _related(x: IntervalVar, y: IntervalVar): void;
     /**
      * Constrain a set of interval variables not to overlap.
      *
@@ -6377,6 +6551,8 @@ export declare class Model {
     /** @internal */
     constraint(constraint: Constraint): void;
     /** @internal */
+    _addBlank(blank: Blank): void;
+    /** @internal */
     boolConst(value: boolean): BoolExpr;
     /** @internal */
     trueConst(): BoolExpr;
@@ -6404,14 +6580,45 @@ export declare class Model {
     }): BoolVar;
     /**@internal */
     auxiliaryBoolVar(name?: string): BoolVar;
-    /** @internal */
-    intVar({ range, optional, name }: {
+    /**
+     * Creates a new integer variable and adds it to the model.
+     *
+     * An integer variable represents an unknown value the solver must find.
+     * The variable can be optional.
+     * In this case, its value in a solution could be _absent_, meaning that the solution does not use the variable at all.
+     *
+     * @param params.range - Constraints the variable's value to be in the given range.
+     * @param params.optional - Whether the variable is optional (can take value _absent_). The default is `false`.
+     * @param params.name - The name of the variable. The default is `undefined`.
+     * @returns The created integer variable.
+     *
+     * @remarks
+     * The parameter `params.range` can be either a number or a tuple of two numbers.
+     * If a number is given, it represents a fixed value.
+     * If a tuple is given, it represents a range of possible values.
+     * The default range is `0` to `IntVarMax`.
+     * If a range is specified but one of the values is undefined (e.g., `range: [, 100]`), then the default value is used instead (in our case, `0`).
+     *
+     * @example
+     *
+     * ```ts
+     * let model = new CP.Model();
+     *
+     * // Create a present integer variable with with possible values 1..10:
+     * let x = model.intVar({ range: [1, 10], name: "x" });
+     *
+     * // Create an optional integer variable with possible values 5..IntVarMax:
+     * let y = model.intVar({ range: [5, ], optional: true, name: "y" });
+     *
+     * // Create an integer variable with a fixed value 10, but optional:
+     * let z = model.intVar({ range: 10, optional: true, name: "z" });
+     * ```
+     */
+    intVar(params: {
         range?: [number?, number?] | number;
         optional?: boolean;
         name?: string;
     }): IntVar;
-    /** @internal */
-    intVar(name?: string): IntVar;
     /** @internal */
     auxiliaryIntVar({ range, optional, name }: {
         range?: [number?, number?] | number;
@@ -6468,13 +6675,13 @@ export declare class Model {
      * let model = new CP.Model();
      *
      * // Create a present interval variable with a fixed start but unknown length:
-     * const x = model.intervalVar({ start: 0, length: [10, 20], name: "x" });
+     * let x = model.intervalVar({ start: 0, length: [10, 20], name: "x" });
      *
      * // Create an interval variable with a start and end ranges:
-     * const y = model.intervalVar({ start: [0, 5], end: [10, 15], name: "y" });
+     * let y = model.intervalVar({ start: [0, 5], end: [10, 15], name: "y" });
      *
      * // Create an optional interval variable with a length interval 5..10:
-     * const z = model.intervalVar({ length: [5, 10], optional: true, name: "z" });
+     * let z = model.intervalVar({ length: [5, 10], optional: true, name: "z" });
      * ```
      *
      * @see {@link IntervalVar}
@@ -6486,33 +6693,6 @@ export declare class Model {
         optional?: boolean;
         name?: string;
     }): IntervalVar;
-    /**
-     * Creates a new present interval variable with the given name and adds it to the model.
-     *
-     * @param name - The name of the interval variable.
-     * @returns The created interval variable.
-     *
-     * @remarks
-     * The default range for start, end and length is `0` to `IntervalMax`.
-     *
-     * @example
-     *
-     * ```ts
-     * const model = new CP.Model();
-     *
-     * // Create an interval variable with a name:
-     * const x = model.intervalVar("x");
-     *
-     * // Create unnamed interval variable (the name will be undefined):
-     * const interval2 = model.intervalVar();
-     * ```
-     * @see {@link IntervalVar}
-     * @see {@link IntervalVar.makeOptional}, {@link IntervalVar.makePresent} and {@link IntervalVar.makeAbsent} for changing the presence of the interval.
-     * @see {@link IntervalVar.setStart}, {@link IntervalVar.setStartMin} and {@link IntervalVar.setStartMax} for changing the start of the interval.
-     * @see {@link IntervalVar.setEnd}, {@link IntervalVar.setEndMin} and {@link IntervalVar.setEndMax} for changing the end of the interval.
-     * @see {@link IntervalVar.setLength}, {@link IntervalVar.setLengthMin} and {@link IntervalVar.setLengthMax} for changing the length of the interval.
-     */
-    intervalVar(name?: string): IntervalVar;
     /** @internal */
     auxiliaryIntervalVar(params: {
         start?: number | [number?, number?];

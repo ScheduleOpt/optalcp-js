@@ -17,7 +17,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2024.11.0";
+export const Version = "2024.11.1";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -165,6 +165,17 @@ export class ModelNode {
 /**
  * @internal
  */
+class Blank extends ModelNode {
+    #isBlankNode;
+    /** @internal */
+    constructor(cp, func, args) {
+        super(cp, func, args);
+        cp._addBlank(this);
+    }
+}
+/**
+ * @internal
+ */
 class ArrayNode extends ModelNode {
     #isNodeArray;
 }
@@ -176,6 +187,11 @@ class Constraint extends ModelNode {
     // different so that we cannot pass Constraint to a function that expects
     // BoolExprArg.
     #isConstraint;
+    /** @internal */
+    constructor(cp, func, args) {
+        super(cp, func, args);
+        cp.constraint(this);
+    }
 }
 // If we don't document FloatExpr, then it is not visible that IntExpr derives
 // from ModelNode.
@@ -197,7 +213,6 @@ export class FloatExpr extends ModelNode {
     _floatIdentity(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
         const result = new Constraint(this._cp, "floatIdentity", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _floatGuard(absentValue = 0) {
@@ -529,7 +544,6 @@ export class IntExpr extends FloatExpr {
     identity(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
         const result = new Constraint(this._cp, "intIdentity", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Creates Boolean expression `this` = `arg`.
@@ -854,7 +868,37 @@ export class BoolExpr extends IntExpr {
 export class Objective extends ModelNode {
     #isObjective;
 }
-/** @internal */
+/**
+ * Integer variable represents an unknown (integer) value that solver has to find.
+ *
+ * The value of the integer variable can be constrained using mathematical expressions, such as {@link Model.plus}, {@link Model.times}, {@link Model.le}, {@link Model.sum}.
+ *
+ * OptalCP solver focuses on scheduling problems and concentrates on {@link IntervalVar} variables.
+ * Therefore, interval variables should be the primary choice for modeling in OptalCP.
+ * However, integer variables can be used for other purposes, such as counting or indexing.
+ * In particular, integer variables can be helpful for cumulative expressions with variable heights; see {@link Model.pulse}, {@link Model.stepAtStart}, {@link Model.stepAtEnd}, and {@link Model.stepAt}.
+ *
+ * The integer variable can be optional.
+ * In this case, the solver can make the variable absent, which is usually interpreted as the fact that the solver does not use the variable at all.
+ * Functions {@link Model.presenceOf} and {@link IntExpr.presence} can constrain the presence of the variable.
+ *
+ * Integer variables can be created using the function {@link Model.intVar | Model.intVar}.
+ *
+ * @example
+ *
+ * In the following example we create three interval variables `x`, `y` and `z`.
+ * Variables `x` and `y` are present, but variable `z` is optional.
+ * Each variable has a different range of possible values.
+ *
+ * ```ts
+ * let model = CP.Model;
+ * let x = model.intervalVar({ name: "x", range: [1, 3] });
+ * let y = model.intervalVar({ name: "y", range: [0, 100] });
+ * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
+ * ```
+ *
+ * @category Modeling
+ */
 export class IntVar extends IntExpr {
     constructor(cp, props, id) {
         if (props === undefined) {
@@ -1011,7 +1055,7 @@ export class BoolVar extends BoolExpr {
  * and we make sure that they don't overlap.  Then, we minimize the maximum of
  * the end times of the three intervals (the makespan):
  * ```ts
- * let model = CP.Model();
+ * let model = new CP.Model;
  * let x = model.intervalVar({ length: 10, name: "x" });
  * let y = model.intervalVar({ length: 10, name: "y" });
  * let z = model.intervalVar({ length: 10, name: "z" });
@@ -1033,7 +1077,7 @@ export class BoolVar extends BoolExpr {
  * `X` and the present interval are equal.
  *
  * ```ts
- * let model = CP.Model();
+ * let model = new CP.Model;
  * let X = model.intervalVar({ length: 10, name: "X" });
  * let XA = model.intervalVar({ name: "XA", optional: true });
  * let XB = model.intervalVar({ name: "XB", optional: true });
@@ -1716,7 +1760,6 @@ export class IntervalVar extends ModelNode {
     alternative(options) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(options)];
         const result = new Constraint(this._cp, "alternative", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Constraints the interval variable to span (cover) a set of other interval variables.
@@ -1729,7 +1772,6 @@ export class IntervalVar extends ModelNode {
     span(covered) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(covered)];
         const result = new Constraint(this._cp, "span", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Creates an expression equal to the position of the interval on the sequence.
@@ -1747,7 +1789,8 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function is the same as {@link Model.pulse | Model.pulse}. */
+    * This function is the same as {@link Model.pulse | Model.pulse}.
+    *  */
     pulse(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
         const result = new CumulExpr(this._cp, "pulse", outParams);
@@ -1758,7 +1801,8 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function is the same as {@link Model.stepAtStart | Model.stepAtStart}. */
+    * This function is the same as {@link Model.stepAtStart | Model.stepAtStart}.
+    *  */
     stepAtStart(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
         const result = new CumulExpr(this._cp, "stepAtStart", outParams);
@@ -1769,7 +1813,8 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function is the same as {@link Model.stepAtEnd | Model.stepAtEnd}. */
+    * This function is the same as {@link Model.stepAtEnd | Model.stepAtEnd}.
+    *  */
     stepAtEnd(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
         const result = new CumulExpr(this._cp, "stepAtEnd", outParams);
@@ -1801,7 +1846,6 @@ export class IntervalVar extends ModelNode {
     forbidExtent(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
         const result = new Constraint(this._cp, "forbidExtent", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
@@ -1823,7 +1867,6 @@ export class IntervalVar extends ModelNode {
     forbidStart(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
         const result = new Constraint(this._cp, "forbidStart", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
@@ -1845,7 +1888,6 @@ export class IntervalVar extends ModelNode {
     forbidEnd(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
         const result = new Constraint(this._cp, "forbidEnd", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _disjunctiveIsBefore(y) {
@@ -1853,8 +1895,13 @@ export class IntervalVar extends ModelNode {
         const result = new BoolExpr(this._cp, "disjunctiveIsBefore", outParams);
         return result;
     }
+    /** @internal */
+    _related(y) {
+        let outParams = [this._getArg(), GetIntervalVar(y)];
+        const result = new Blank(this._cp, "related", outParams);
+    }
 }
-// TODO:2 When we have constraints on sequenceVar then fix the following doc.
+// TODO:2 When we have other constraints on sequenceVar then add links into the following doc.
 /**
  * Models a sequence (order) of interval variables.
  *
@@ -1983,13 +2030,11 @@ export class SequenceVar extends ModelNode {
         if (transitions !== undefined)
             outParams.push(this._cp._getIntMatrix(transitions));
         const result = new Constraint(this._cp, "noOverlap", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _sameSequence(sequence2) {
         let outParams = [this._getArg(), GetSequenceVar(sequence2)];
         const result = new Constraint(this._cp, "sameSequence", outParams);
-        this._cp.constraint(result);
     }
 }
 /**
@@ -2084,7 +2129,6 @@ export class CumulExpr extends ModelNode {
     cumulLe(maxCapacity) {
         let outParams = [this._getArg(), GetInt(maxCapacity)];
         const result = new Constraint(this._cp, "cumulLe", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Constraints the cumulative function to be everywhere greater or equal to `minCapacity`.
@@ -2098,19 +2142,16 @@ export class CumulExpr extends ModelNode {
     cumulGe(minCapacity) {
         let outParams = [this._getArg(), GetInt(minCapacity)];
         const result = new Constraint(this._cp, "cumulGe", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _cumulMaxProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
         const result = new Constraint(this._cp, "cumulMaxProfile", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _cumulMinProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
         const result = new Constraint(this._cp, "cumulMinProfile", outParams);
-        this._cp.constraint(result);
     }
 }
 /**
@@ -2160,7 +2201,6 @@ export class IntStepFunction extends ModelNode {
     _stepFunctionSumInRange(interval, lb, ub) {
         let outParams = [this._getArg(), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this._cp, "intStepFunctionSumInRange", outParams);
-        this._cp.constraint(result);
     }
     /**
     * Evaluates the step function at a given point.
@@ -2183,13 +2223,11 @@ export class IntStepFunction extends ModelNode {
     _stepFunctionEvalInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this._cp, "intStepFunctionEvalInRange", outParams);
-        this._cp.constraint(result);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this._cp, "intStepFunctionEvalNotInRange", outParams);
-        this._cp.constraint(result);
     }
 }
 /** @internal */
@@ -3515,6 +3553,36 @@ let ParameterCatalog = {
             throw Error("Parameter LNSPortionHandicapInitialQ: value " + value + " is not in required range 0..1.");
         workerParams._lnsPortionHandicapInitialQ = value;
     },
+    // LNSNeighborhoodStrategy
+    /** @internal */
+    _setLNSNeighborhoodStrategy: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter LNSNeighborhoodStrategy: value " + value + " is not an integer.");
+        if (value < 0 || value > 2)
+            throw Error("Parameter LNSNeighborhoodStrategy: value " + value + " is not in required range 0..2.");
+        workerParams._lnsNeighborhoodStrategy = value;
+    },
+    // LNSNeighborhoodEpsilon
+    /** @internal */
+    _setLNSNeighborhoodEpsilon: function (workerParams, value) {
+        if (value < 0 || value > 1)
+            throw Error("Parameter LNSNeighborhoodEpsilon: value " + value + " is not in required range 0..1.");
+        workerParams._lnsNeighborhoodEpsilon = value;
+    },
+    // LNSNeighborhoodAlpha
+    /** @internal */
+    _setLNSNeighborhoodAlpha: function (workerParams, value) {
+        if (value < 0 || value > 1)
+            throw Error("Parameter LNSNeighborhoodAlpha: value " + value + " is not in required range 0..1.");
+        workerParams._lnsNeighborhoodAlpha = value;
+    },
+    // LNSNeighborhoodInitialQ
+    /** @internal */
+    _setLNSNeighborhoodInitialQ: function (workerParams, value) {
+        if (value < 0 || value > 1)
+            throw Error("Parameter LNSNeighborhoodInitialQ: value " + value + " is not in required range 0..1.");
+        workerParams._lnsNeighborhoodInitialQ = value;
+    },
     // LNSDivingLimit
     /** @internal */
     _setLNSDivingLimit: function (workerParams, value) {
@@ -4268,6 +4336,30 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSPortionHandicapInitialQ,
         setOnWorker: ParameterCatalog._setLNSPortionHandicapInitialQ,
     },
+    lnsneighborhoodstrategy: {
+        name: 'LNSNeighborhoodStrategy',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodStrategy,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodStrategy,
+    },
+    lnsneighborhoodepsilon: {
+        name: 'LNSNeighborhoodEpsilon',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodEpsilon,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodEpsilon,
+    },
+    lnsneighborhoodalpha: {
+        name: 'LNSNeighborhoodAlpha',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodAlpha,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodAlpha,
+    },
+    lnsneighborhoodinitialq: {
+        name: 'LNSNeighborhoodInitialQ',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodInitialQ,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodInitialQ,
+    },
     lnsdivinglimit: {
         name: 'LNSDivingLimit',
         parse: ParseNumber,
@@ -4797,7 +4889,7 @@ export class ModelDomains {
  *
  * #### Variables
  *
- * Interval variables can be created by function {@link intervalVar}.
+ * Interval variables can be created by function {@link intervalVar}, integer variables by function {@link intVar}.
  *
  * #### Basic integer expressions
  *
@@ -4856,6 +4948,7 @@ export class ModelDomains {
  *
  *  * {@link sequenceVar}: sequence variable over a set of interval variables.
  *  * {@link noOverlap}: constraints a set of interval variables to not overlap (possibly with transition times).
+ *  * {@link position}: returns the position of an interval variable in a sequence.
  *
  * #### Basic cumulative expressions
  *
@@ -5171,7 +5264,6 @@ export class Model {
     identity(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
         const result = new Constraint(this, "intIdentity", outParams);
-        this.constraint(result);
     }
     /**
     * Creates Boolean expression `arg1` = `arg2`.
@@ -5478,7 +5570,6 @@ export class Model {
     _floatIdentity(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
         const result = new Constraint(this, "floatIdentity", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _floatGuard(arg, absentValue = 0) {
@@ -5627,22 +5718,18 @@ export class Model {
     lexLe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexLe", outParams);
-        this.constraint(result);
     }
     lexLt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexLt", outParams);
-        this.constraint(result);
     }
     lexGe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexGe", outParams);
-        this.constraint(result);
     }
     lexGt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexGt", outParams);
-        this.constraint(result);
     }
     /**
     * Creates an integer expression for the start of an interval variable.
@@ -6046,7 +6133,6 @@ export class Model {
     alternative(main, options) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options)];
         const result = new Constraint(this, "alternative", outParams);
-        this.constraint(result);
     }
     /**
     * Constraints an interval variable to span (cover) a set of other interval variables.
@@ -6097,7 +6183,6 @@ export class Model {
     span(main, covered) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(covered)];
         const result = new Constraint(this, "span", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _noOverlap(sequence, transitions) {
@@ -6105,7 +6190,6 @@ export class Model {
         if (transitions !== undefined)
             outParams.push(this._getIntMatrix(transitions));
         const result = new Constraint(this, "noOverlap", outParams);
-        this.constraint(result);
     }
     /**
     * Creates an expression equal to the position of the `interval` on the `sequence`.
@@ -6129,20 +6213,19 @@ export class Model {
     _sameSequence(sequence1, sequence2) {
         let outParams = [GetSequenceVar(sequence1), GetSequenceVar(sequence2)];
         const result = new Constraint(this, "sameSequence", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _sameSequenceGroup(sequences) {
         let outParams = [this._getSequenceVarArray(sequences)];
         const result = new Constraint(this, "sameSequenceGroup", outParams);
-        this.constraint(result);
     }
     /**
+    *
     * Creates cumulative function (expression) _pulse_ for the given interval variable and height.
     *
     * @remarks
     *
-    * Pulse can be used to model resource requirement during an interval variable. The given amount `height` of the resource is used during the whole interval (from start to end).
+    * Pulse can be used to model a resource requirement during an interval variable. The given amount `height` of the resource is used throughout the interval (from start to end).
     *
     * #### Formal definition
     *
@@ -6152,17 +6235,17 @@ export class Model {
     * * `height` between `interval.start()` and `interval.end()`,
     * * `0` after `interval.end()`
     *
-    * If `interval` is absent, then the pulse is `0` everywhere.
+    * If `interval` is absent, the pulse is `0` everywhere.
     *
-    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
     *
-    * :::info
-    * Pulses with variable heights (i.e. with `height` given as `IntExpr`) are not supported yet.
-    * :::
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the pulse is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * @example
     *
-    * Let's consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
+    * Let us consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
     *
     * ```ts
     * // The input data:
@@ -6200,6 +6283,41 @@ export class Model {
     * let result = await CP.solve(model, { searchType: "FDS" });
     * ```
     *
+    * @example
+    *
+    * In the following example, we create three interval variables `x`, `y`, and `z` that represent some tasks. Variables `x` and `y` are present, but variable `z` is optional. Each task requires a certain number of workers. The length of the task depends on the assigned number of workers. The number of assigned workers is modeled using integer variables `workersX`, `workersY`, and `workersZ`.
+    *
+    * There are 7 workers. Therefore, at any time, the sum of the workers assigned to the running tasks must be less or equal to 7.
+    *
+    * If the task `z` is absent, then the variable `workersZ` has no meaning, and therefore, it should also be absent.
+    *
+    * ```ts
+    * let model = CP.Model;
+    * let x = model.intervalVar({ name: "x" });
+    * let y = model.intervalVar({ name: "y" });
+    * let z = model.intervalVar({ name: "z", optional: true });
+    *
+    * let workersX = model.intVar({ range: [1, 5], name: "workersX" });
+    * let workersY = model.intVar({ range: [1, 5], name: "workersY" });
+    * let workersZ = model.intVar({ range: [1, 5], name: "workersZ", optional: true });
+    *
+    * // workersZ is present if an only if z is present:
+    * model.constraint(z.presence().eq(workersZ.presence()));
+    *
+    * let pulseX = model.pulse(x, workersX);
+    * let pulseY = model.pulse(y, workersY);
+    * let pulseZ = model.pulse(z, workersZ);
+    *
+    * // There are at most 7 workers at any time:
+    * model.cumulSum([pulseX, pulseY, pulseZ]).cumulLe(7);
+    *
+    * // Length of the task depends on the number of workers using the following formula:
+    * //    length * workersX = 12
+    * model.constraint(x.length().times(workersX).eq(12));
+    * model.constraint(y.length().times(workersY).eq(12));
+    * model.constraint(z.length().times(workersZ).eq(12));
+    * ```
+    *
     * @see {@link IntervalVar.pulse | IntervalVar.pulse} is equivalent function on {@link IntervalVar}.
     * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt} for other basic cumulative functions.
     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
@@ -6210,15 +6328,20 @@ export class Model {
         return result;
     }
     /**
+    *
     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
     *
-    * A `stepAtStart` can be used to change the amount of such resource at the start of a given variable. The amount is changed by the given `height`.
+    * A `stepAtStart` can change the amount of such resource at the start of a given variable. The amount is changed by the given `height`, which can be positive or negative.
     *
-    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+    *
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -6227,7 +6350,7 @@ export class Model {
     * * `0` before `interval.start()`,
     * * `height` after `interval.start()`.
     *
-    * If `interval` is _absent_ then the created cumulative function is `0` everywhere.
+    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
     *
     * :::info
     * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
@@ -6235,7 +6358,7 @@ export class Model {
     *
     * @example
     *
-    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -6291,15 +6414,20 @@ export class Model {
         return result;
     }
     /**
+    *
     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
     *
     * @remarks
     *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and so its amount is changing over time. Example of such a resource is a battery, an account balance, a stock of a product, etc.
+    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
     *
-    * A `stepAtEnd` can be used to change the amount of such resource at the end of a given variable. The amount is changed by the given `height`.
+    * A `stepAtEnd` can change the amount of such resource at the end of a given variable. The amount is changed by the given `height`, which can be positive or negative.
     *
-    * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. The minimum and the maximum height of a cumulative function can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+    *
+    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+    *
+    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
     *
     * #### Formal definition
     *
@@ -6308,7 +6436,7 @@ export class Model {
     * * `0` before `interval.end()`,
     * * `height` after `interval.end()`.
     *
-    * If `interval` is _absent_ then the created cumulative function is `0` everywhere.
+    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
     *
     * :::info
     * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
@@ -6316,7 +6444,7 @@ export class Model {
     *
     * @example
     *
-    * Let's consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
     *
     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
     *
@@ -6372,11 +6500,11 @@ export class Model {
         return result;
     }
     /**
-    * Creates cumulative function (expression) that changes value at `x` by the given `height`.
+    * Creates cumulative function (expression) that changes value at `x` by the given `height`. The height can be positive or negative, and it can be given by a constant or an expression (for example, by {@link Model.intVar}).
     *
     * @remarks
     *
-    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}, but the time of the change is given by parameter `x` instead of by the start/end of an interval variable.
+    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}. However, the time of the change is given by the constant value `x` instead of by the start/end of an interval variable.
     *
     * #### Formal definition
     *
@@ -6478,7 +6606,6 @@ export class Model {
     cumulLe(cumul, maxCapacity) {
         let outParams = [GetCumulExpr(cumul), GetInt(maxCapacity)];
         const result = new Constraint(this, "cumulLe", outParams);
-        this.constraint(result);
     }
     /**
     * Constrains cumulative function `cumul` to be everywhere greater or equal to `minCapacity`.
@@ -6494,19 +6621,16 @@ export class Model {
     cumulGe(cumul, minCapacity) {
         let outParams = [GetCumulExpr(cumul), GetInt(minCapacity)];
         const result = new Constraint(this, "cumulGe", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _cumulMaxProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
         const result = new Constraint(this, "cumulMaxProfile", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _cumulMinProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
         const result = new Constraint(this, "cumulMinProfile", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _cumulStairs(atoms) {
@@ -6546,7 +6670,6 @@ export class Model {
     _stepFunctionSumInRange(func, interval, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this, "intStepFunctionSumInRange", outParams);
-        this.constraint(result);
     }
     /**
     * Evaluates a step function at a given point.
@@ -6569,13 +6692,11 @@ export class Model {
     _stepFunctionEvalInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this, "intStepFunctionEvalInRange", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
         const result = new Constraint(this, "intStepFunctionEvalNotInRange", outParams);
-        this.constraint(result);
     }
     /**
     * Forbid the interval variable to overlap with segments of the function where the value is zero.
@@ -6591,7 +6712,6 @@ export class Model {
     forbidExtent(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
         const result = new Constraint(this, "forbidExtent", outParams);
-        this.constraint(result);
     }
     /**
     * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
@@ -6613,7 +6733,6 @@ export class Model {
     forbidStart(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
         const result = new Constraint(this, "forbidStart", outParams);
-        this.constraint(result);
     }
     /**
     * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
@@ -6635,7 +6754,6 @@ export class Model {
     forbidEnd(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
         const result = new Constraint(this, "forbidEnd", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _disjunctiveIsBefore(x, y) {
@@ -6647,25 +6765,21 @@ export class Model {
     _itvPresenceChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
         const result = new Constraint(this, "itvPresenceChain", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _itvPresenceChainWithCount(intervals, count) {
         let outParams = [this._getIntervalVarArray(intervals), GetIntExpr(count)];
         const result = new Constraint(this, "itvPresenceChainWithCount", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _endBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
         const result = new Constraint(this, "endBeforeStartChain", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _startBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
         const result = new Constraint(this, "startBeforeStartChain", outParams);
-        this.constraint(result);
     }
     /** @internal */
     _decisionPresentIntVar(variable, isLeft) {
@@ -6767,7 +6881,11 @@ export class Model {
     _noGood(decisions) {
         let outParams = [this._getSearchDecisionArray(decisions)];
         const result = new Constraint(this, "noGood", outParams);
-        this.constraint(result);
+    }
+    /** @internal */
+    _related(x, y) {
+        let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
+        const result = new Blank(this, "related", outParams);
     }
     noOverlap(seq, transitions) {
         if (Array.isArray(seq))
@@ -6790,6 +6908,10 @@ export class Model {
     getName() { return this.#name; }
     constraint(constraint) {
         this.#model.push(GetConstraint(constraint));
+    }
+    /** @internal */
+    _addBlank(blank) {
+        this.#model.push(blank._getArg());
     }
     /** @internal */
     boolConst(value) {
@@ -6842,23 +6964,53 @@ export class Model {
         x._makeAuxiliary();
         return x;
     }
-    intVar(arg) {
+    /**
+     * Creates a new integer variable and adds it to the model.
+     *
+     * An integer variable represents an unknown value the solver must find.
+     * The variable can be optional.
+     * In this case, its value in a solution could be _absent_, meaning that the solution does not use the variable at all.
+     *
+     * @param params.range - Constraints the variable's value to be in the given range.
+     * @param params.optional - Whether the variable is optional (can take value _absent_). The default is `false`.
+     * @param params.name - The name of the variable. The default is `undefined`.
+     * @returns The created integer variable.
+     *
+     * @remarks
+     * The parameter `params.range` can be either a number or a tuple of two numbers.
+     * If a number is given, it represents a fixed value.
+     * If a tuple is given, it represents a range of possible values.
+     * The default range is `0` to `IntVarMax`.
+     * If a range is specified but one of the values is undefined (e.g., `range: [, 100]`), then the default value is used instead (in our case, `0`).
+     *
+     * @example
+     *
+     * ```ts
+     * let model = new CP.Model();
+     *
+     * // Create a present integer variable with with possible values 1..10:
+     * let x = model.intVar({ range: [1, 10], name: "x" });
+     *
+     * // Create an optional integer variable with possible values 5..IntVarMax:
+     * let y = model.intVar({ range: [5, ], optional: true, name: "y" });
+     *
+     * // Create an integer variable with a fixed value 10, but optional:
+     * let z = model.intVar({ range: 10, optional: true, name: "z" });
+     * ```
+     */
+    intVar(params) {
         const x = new IntVar(this);
-        if (typeof arg === "string")
-            x.setName(arg);
-        else if (typeof arg === "object") {
-            if (arg.name)
-                x.setName(arg.name);
-            if (arg.optional)
-                x.makeOptional();
-            if (typeof arg.range === "number")
-                x.setRange(arg.range, arg.range);
-            else if (Array.isArray(arg.range)) {
-                if (arg.range[0] !== undefined)
-                    x.setMin(arg.range[0]);
-                if (arg.range[1] !== undefined)
-                    x.setMax(arg.range[1]);
-            }
+        if (params.name)
+            x.setName(params.name);
+        if (params.optional)
+            x.makeOptional();
+        if (typeof params.range === "number")
+            x.setRange(params.range, params.range);
+        else if (Array.isArray(params.range)) {
+            if (params.range[0] !== undefined)
+                x.setMin(params.range[0]);
+            if (params.range[1] !== undefined)
+                x.setMax(params.range[1]);
         }
         this.#model.push(x._getArg());
         this.#intVars.push(x);
@@ -6896,40 +7048,79 @@ export class Model {
         x._makeAuxiliary();
         return x;
     }
-    intervalVar(param) {
+    /**
+     * Creates a new interval variable and adds it to the model.
+     *
+     * An interval variable represents an unknown interval (a task, operation,
+     * action) that the solver assigns a value in such a way as to satisfy all
+     * constraints.  An interval variable has a start, end, and length. In a
+     * solution, _start ≤ end_ and  _length = end - start_.
+     *
+     * The interval variable can be optional. In this case, its value in a solution
+     * could be _absent_, meaning that the task/operation is not performed.
+     *
+     * @param params.start - Constraints the start of the interval.
+     * @param params.end - Constraints the end of the interval.
+     * @param params.length - Constraints the length of the interval.
+     * @param params.optional - Whether the interval variable is optional (can take value _absent_). The default is `false`.
+     * @param params.name - The name of the interval variable. The default is `undefined`.
+     * @returns The created interval variable.
+     *
+     * @remarks
+     * Parameters `params.start`, `params.end`, and `params.length` can be either a
+     * number or a tuple of two numbers.  If a number is given, it represents a
+     * fixed value. If a tuple is given, it represents a range of possible values.
+     * The default range for start, end and length is `0` to `IntervalMax`.
+     * If a range is specified but one of the values is undefined (e.g. `start: [, 100]`)
+     * then the default value is used instead (in our case `0`).
+     *
+     * @example
+     *
+     * ```ts
+     * let model = new CP.Model();
+     *
+     * // Create a present interval variable with a fixed start but unknown length:
+     * let x = model.intervalVar({ start: 0, length: [10, 20], name: "x" });
+     *
+     * // Create an interval variable with a start and end ranges:
+     * let y = model.intervalVar({ start: [0, 5], end: [10, 15], name: "y" });
+     *
+     * // Create an optional interval variable with a length interval 5..10:
+     * let z = model.intervalVar({ length: [5, 10], optional: true, name: "z" });
+     * ```
+     *
+     * @see {@link IntervalVar}
+     */
+    intervalVar(params) {
         const itv = new IntervalVar(this);
-        if (typeof param === "string")
-            itv.setName(param);
-        else if (typeof param === "object") {
-            if (typeof param.start === "number")
-                itv.setStart(param.start);
-            else if (Array.isArray(param.start)) {
-                if (param.start[0] !== undefined)
-                    itv.setStartMin(param.start[0]);
-                if (param.start[1] !== undefined)
-                    itv.setStartMax(param.start[1]);
-            }
-            if (typeof param.end === "number")
-                itv.setEnd(param.end);
-            else if (Array.isArray(param.end)) {
-                if (param.end[0] !== undefined)
-                    itv.setEndMin(param.end[0]);
-                if (param.end[1] !== undefined)
-                    itv.setEndMax(param.end[1]);
-            }
-            if (typeof param.length === "number")
-                itv.setLength(param.length);
-            else if (Array.isArray(param.length)) {
-                if (param.length[0] !== undefined)
-                    itv.setLengthMin(param.length[0]);
-                if (param.length[1] !== undefined)
-                    itv.setLengthMax(param.length[1]);
-            }
-            if (param.optional === true)
-                itv.makeOptional();
-            if (param.name !== undefined)
-                itv.setName(param.name);
+        if (typeof params.start === "number")
+            itv.setStart(params.start);
+        else if (Array.isArray(params.start)) {
+            if (params.start[0] !== undefined)
+                itv.setStartMin(params.start[0]);
+            if (params.start[1] !== undefined)
+                itv.setStartMax(params.start[1]);
         }
+        if (typeof params.end === "number")
+            itv.setEnd(params.end);
+        else if (Array.isArray(params.end)) {
+            if (params.end[0] !== undefined)
+                itv.setEndMin(params.end[0]);
+            if (params.end[1] !== undefined)
+                itv.setEndMax(params.end[1]);
+        }
+        if (typeof params.length === "number")
+            itv.setLength(params.length);
+        else if (Array.isArray(params.length)) {
+            if (params.length[0] !== undefined)
+                itv.setLengthMin(params.length[0]);
+            if (params.length[1] !== undefined)
+                itv.setLengthMax(params.length[1]);
+        }
+        if (params.optional === true)
+            itv.makeOptional();
+        if (params.name !== undefined)
+            itv.setName(params.name);
         this.#model.push(itv._getArg());
         this.#intervalVars.push(itv);
         return itv;
