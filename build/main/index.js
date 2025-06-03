@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) CoEnzyme SAS - All Rights Reserved
  *
  * This source code is protected under international copyright law.  All rights
@@ -6,6 +6,12 @@
  * This file is confidential and only available to authorized individuals with the
  * permission of the copyright holders.  If you encounter this file and do not have
  * permission, please contact the copyright holders and delete this file.
+ */
+/**
+ * @packageDocumentation
+ * @document ../doc/vsCPO/overview.md
+ * @document ../doc/vsCPO/optionals.md
+ * @document ../doc/vsCPO/list.md
  */
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
@@ -15,9 +21,9 @@ import * as fs from 'node:fs';
 // The following typedoc comment is for constant Version that is added by generate_ts:
 /**
  * The version of the module, such as "1.0.0".
- * @category Constants
+ * @group Constants
  */
-export const Version = "2024.11.1";
+export const Version = "2025.6.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -37,30 +43,30 @@ const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 
  * ```
  * Because for any value of `x`, the expression `x*x` is greater than `IntVarMax` and thus cannot be computed.
  *
- * @category Constants
+ * @group Constants
  */
 export const IntVarMax = 1073741823;
 /**
  * Minimum value of a decision variable or a decision expression (such as `x+1` where `x` is a variable).
  * The opposite of {@link IntVarMax}.
- * @category Constants
+ * @group Constants
  */
 export const IntVarMin = -IntVarMax;
 /**
  * Maximum value of start or end of an interval variable. The opposite of {@link IntervalMin}.
- * @category Constants
+ * @group Constants
  */
 export const IntervalMax = 715827882;
 /**
  * Minimum value of start or end of an interval variable. The opposite of {@link IntervalMax}.
- * @category Constants
+ * @group Constants
  */
 export const IntervalMin = -715827882;
 /**
  * Maximum length of an interval variable. The maximum length can be achieved by
  * an interval that starts at {@link IntervalMin} and ends at {@link
  * IntervalMax}.
- * @category Constants
+ * @group Constants
  */
 export const LengthMax = IntervalMax - IntervalMin;
 /** @internal */
@@ -84,7 +90,7 @@ export const FloatVarMin = -FloatVarMax;
  *
  * Any modeling object can be assigned a name, see {@link ModelNode#setName} and {@link ModelNode#getName}.
  *
- * @category Modeling
+ * @group Modeling
  */
 export class ModelNode {
     _props;
@@ -199,7 +205,7 @@ class Constraint extends ModelNode {
  * A class representing floating-point expression in the model.
  * Currently, there is no way to create floating-point expressions.
  * The class is only a base class for {@link IntExpr}.
- * @category Modeling
+ * @group Modeling
  */
 export class FloatExpr extends ModelNode {
     #isFloatExpr;
@@ -389,7 +395,7 @@ export class FloatExpr extends ModelNode {
  *    is at least 10. In this case, `isBefore` is _true_.
  * 2. `x` is absent and `y` is present. In this case, `isBefore` is _absent_.
  *
- * @category Modeling
+ * @group Modeling
  */
 export class IntExpr extends FloatExpr {
     #isIntExpr;
@@ -783,7 +789,7 @@ export class IntExpr extends FloatExpr {
  * as integer expressions. In this case, _true_ is equal to _1_, _false_ is
  * equal to _0_, and _absent_ remains _absent_.
  *
- * @category Modeling
+ * @group Modeling
  */
 export class BoolExpr extends IntExpr {
     #isBoolExpr;
@@ -897,7 +903,7 @@ export class Objective extends ModelNode {
  * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
  * ```
  *
- * @category Modeling
+ * @group Modeling
  */
 export class IntVar extends IntExpr {
     constructor(cp, props, id) {
@@ -1093,7 +1099,7 @@ export class BoolVar extends BoolExpr {
  * model.noOverlap([... , XB, ...]);
  * ```
  *
- * @category Modeling
+ * @group Modeling
  */
 export class IntervalVar extends ModelNode {
     #isIntervalVar;
@@ -1912,6 +1918,8 @@ export class IntervalVar extends ModelNode {
  * and allows additional constraints on the order to be stated.
  *
  * @see {@link Model.position}.
+ *
+ * @group Modeling
  */
 export class SequenceVar extends ModelNode {
     #isSequenceVar;
@@ -2077,7 +2085,7 @@ export class SequenceVar extends ModelNode {
  *
  * See {@link Model.cumulLe} and {@link Model.cumulGe} for examples.
  *
- * @category Modeling
+ * @group Modeling
  */
 export class CumulExpr extends ModelNode {
     #isCumulExpr;
@@ -2159,7 +2167,7 @@ export class CumulExpr extends ModelNode {
  *
  * Integer step function is a piecewise constant function defined on integer
  * values in range {@link IntVarMin} to {@link IntVarMax}. The function can be
- * created by {@link Model.intStepFunction}.
+ * created by {@link Model.stepFunction}.
  *
  * Step functions can be used in the following ways:
  *
@@ -2168,7 +2176,7 @@ export class CumulExpr extends ModelNode {
  *   * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
  *   * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
  *
- * @category Modeling
+ * @group Modeling
  */
 export class IntStepFunction extends ModelNode {
     #isStepFunction;
@@ -2380,7 +2388,7 @@ function IsCumulExprArray(arg) {
  * @param params The {@link Parameters} object to copy.
  * @returns A deep copy of the input {@link Parameters} object.
  *
- * @category Parameters
+ * @group Parameters
  */
 export function copyParameters(params) {
     let copy = { ...params };
@@ -2407,6 +2415,8 @@ export function copyParameters(params) {
  * object `modifications` is used.
  *
  * Input objects are not modified.
+ *
+ * @group Parameters
  */
 export function combineParameters(source, modifications) {
     let result = copyParameters(source);
@@ -2449,6 +2459,7 @@ Major options:\n\
   --warningLevel uint32            Level of warnings\n\
   --logPeriod double               How often to print log messages (in seconds)\n\
   --verifySolutions bool           When on, the correctness of solutions is verified\n\
+  --verifyExternalSolutions bool   Whether to verify corectness of external solutions\n\
   --allocationBlockSize uint32     The minimal amount of memory in kB for a single allocation\n\
 \n\
 Limits:\n\
@@ -2458,6 +2469,10 @@ Limits:\n\
 Gap Tolerance:\n\
   --absoluteGapTolerance double    Stop the search when the gap is below the tolerance\n\
   --relativeGapTolerance double    Stop the search when the gap is below the tolerance\n\
+\n\
+Tuning:\n\
+  --tagsFromNames Never|Auto|Merge|Force\n\
+                                   Whether to derive tags from names\n\
 \n\
 Propagation levels:\n\
   --noOverlapPropagationLevel uint32\n\
@@ -2470,6 +2485,9 @@ Propagation levels:\n\
   --stepFunctionSumPropagationLevel uint32\n\
                                    How much to propagate stepFunctionSum expression\n\
   --usePrecedenceEnergy uint32     Whether to use precedence energy propagation algorithm\n\
+  --packPropagationLevel uint32    How much to propagate pack constraints\n\
+  --itvMappingPropagationLevel uint32\n\
+                                   How much to propagate itvMapping constraint\n\
 \n\
 Failure-Directed Search:\n\
   --fdsInitialRating double        Initial rating for newly created choices\n\
@@ -2556,7 +2574,7 @@ function handleHelp(args, params, help) {
  * Parameter _params_ is input/output.  It may contain a default setting that will
  * be overwritten during parsing.
  *
- * In case of an error (e.g.
+ * In case of an error (e.g.,
  * unrecognized parameter or an invalid parameter value) the function prints the
  * error an calls `process.exit(1)`.
  *
@@ -2592,7 +2610,15 @@ function handleHelp(args, params, help) {
  * ...
  * ```
  *
- * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
+ * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
+ *
+ *  * `--workerN.` or `--workersN.` for worker `N`
+ *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ *
+ * For example:
+ *
+ * * `--worker0.searchType FDS` sets the search type to the first worker only.
+ * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
  * @see This function does not accept any unrecognized arguments. See function
@@ -2601,7 +2627,7 @@ function handleHelp(args, params, help) {
  * @see See {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    functions that parse {@link BenchmarkParameters}.
  *
- * @category Parameters
+ * @group Parameters
  */
 export function parseParameters(params = {}, args = process.argv.slice(2)) {
     handleHelp(args, params, ParametersHelp);
@@ -2674,7 +2700,7 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
  * @see functions {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    for parsing {@link BenchmarkParameters}.
  *
- * @category Parameters
+ * @group Parameters
  */
 export function parseSomeParameters(params, args = process.argv.slice(2)) {
     handleHelp(args, params, ParametersHelp);
@@ -2750,8 +2776,10 @@ function paramsFromJSON(params) {
  *     the it is searched too.
  *   * Finally, if nothing from the above works, the function assumes that
  *     `optalcp` is in the `PATH` and returns returns just `optalcp`.
+ *
+ * @group Other
 */
-function calcSolverPath(params) {
+export function calcSolverPath(params) {
     if (params.solverPath !== undefined)
         return params.solverPath;
     if (process.env.OPTALCP_SOLVER !== undefined && process.env.OPTALCP_SOLVER !== "")
@@ -2803,6 +2831,8 @@ function parametersToCLA(params) {
     let result = "";
     let p = params;
     for (const key in p) {
+        if (key == "usage")
+            continue;
         let value = p[key];
         if (value !== undefined && value !== null && typeof value != "object")
             result += "--" + key + " " + p[key] + " ";
@@ -2925,6 +2955,10 @@ let ParameterCatalog = {
     setVerifySolutions: function (params, value) {
         params.verifySolutions = value;
     },
+    // VerifyExternalSolutions
+    setVerifyExternalSolutions: function (params, value) {
+        params.verifyExternalSolutions = value;
+    },
     // AllocationBlockSize
     setAllocationBlockSize: function (workerParams, value) {
         if (!Number.isInteger(value))
@@ -3000,6 +3034,27 @@ let ParameterCatalog = {
     setRelativeGapTolerance: function (params, value) {
         params.relativeGapTolerance = value;
     },
+    // TagsFromNames
+    setTagsFromNames: function (params, value) {
+        if (typeof value != 'string')
+            throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'never':
+                value = 'Never';
+                break;
+            case 'auto':
+                value = 'Auto';
+                break;
+            case 'merge':
+                value = 'Merge';
+                break;
+            case 'force':
+                value = 'Force';
+                break;
+            default: throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
+        }
+        params.tagsFromNames = value;
+    },
     // NoOverlapPropagationLevel
     setNoOverlapPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
@@ -3047,6 +3102,22 @@ let ParameterCatalog = {
         if (value < 0 || value > 1)
             throw Error("Parameter UsePrecedenceEnergy: value " + value + " is not in required range 0..1.");
         params.usePrecedenceEnergy = value;
+    },
+    // PackPropagationLevel
+    setPackPropagationLevel: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter PackPropagationLevel: value " + value + " is not an integer.");
+        if (value < 1 || value > 2)
+            throw Error("Parameter PackPropagationLevel: value " + value + " is not in required range 1..2.");
+        workerParams.packPropagationLevel = value;
+    },
+    // ItvMappingPropagationLevel
+    setItvMappingPropagationLevel: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter ItvMappingPropagationLevel: value " + value + " is not an integer.");
+        if (value < 1 || value > 2)
+            throw Error("Parameter ItvMappingPropagationLevel: value " + value + " is not in required range 1..2.");
+        workerParams.itvMappingPropagationLevel = value;
     },
     // SearchTraceLevel
     setSearchTraceLevel: function (workerParams, value) {
@@ -3452,24 +3523,6 @@ let ParameterCatalog = {
             throw Error("Parameter LNSApplyCutProbability: value " + value + " is not in required range 0..1.");
         workerParams._lnsApplyCutProbability = value;
     },
-    // LNSDiscretePOSAlgorithm
-    /** @internal */
-    _setLNSDiscretePOSAlgorithm: function (workerParams, value) {
-        if (!Number.isInteger(value))
-            throw Error("Parameter LNSDiscretePOSAlgorithm: value " + value + " is not an integer.");
-        if (value < 0 || value > 1)
-            throw Error("Parameter LNSDiscretePOSAlgorithm: value " + value + " is not in required range 0..1.");
-        workerParams._lnsDiscretePOSAlgorithm = value;
-    },
-    // LNSReservoirPOSAlgorithm
-    /** @internal */
-    _setLNSReservoirPOSAlgorithm: function (workerParams, value) {
-        if (!Number.isInteger(value))
-            throw Error("Parameter LNSReservoirPOSAlgorithm: value " + value + " is not an integer.");
-        if (value < 0 || value > 1)
-            throw Error("Parameter LNSReservoirPOSAlgorithm: value " + value + " is not in required range 0..1.");
-        workerParams._lnsReservoirPOSAlgorithm = value;
-    },
     // LNSSmallStructureLimit
     /** @internal */
     _setLNSSmallStructureLimit: function (workerParams, value) {
@@ -3479,14 +3532,10 @@ let ParameterCatalog = {
             throw Error("Parameter LNSSmallStructureLimit: value " + value + " is not in required range 0..10.");
         workerParams._lnsSmallStructureLimit = value;
     },
-    // LNSStructureAlternativeLimit
+    // LNSResourceOptimization
     /** @internal */
-    _setLNSStructureAlternativeLimit: function (workerParams, value) {
-        if (!Number.isInteger(value))
-            throw Error("Parameter LNSStructureAlternativeLimit: value " + value + " is not an integer.");
-        if (value < 0 || value > 4294967295)
-            throw Error("Parameter LNSStructureAlternativeLimit: value " + value + " is not in required range 0..4294967295.");
-        workerParams._lnsStructureAlternativeLimit = value;
+    _setLNSResourceOptimization: function (workerParams, value) {
+        workerParams._lnsResourceOptimization = value;
     },
     // LNSHeuristicsEpsilon
     /** @internal */
@@ -3501,6 +3550,18 @@ let ParameterCatalog = {
         if (value < 0 || value > 1)
             throw Error("Parameter LNSHeuristicsAlpha: value " + value + " is not in required range 0..1.");
         workerParams._lnsHeuristicsAlpha = value;
+    },
+    // LNSHeuristicsTemperature
+    /** @internal */
+    _setLNSHeuristicsTemperature: function (workerParams, value) {
+        if (value < -1 || value > 1)
+            throw Error("Parameter LNSHeuristicsTemperature: value " + value + " is not in required range -1..1.");
+        workerParams._lnsHeuristicsTemperature = value;
+    },
+    // LNSHeuristicsUniform
+    /** @internal */
+    _setLNSHeuristicsUniform: function (workerParams, value) {
+        workerParams._lnsHeuristicsUniform = value;
     },
     // LNSHeuristicsInitialQ
     /** @internal */
@@ -3523,6 +3584,18 @@ let ParameterCatalog = {
             throw Error("Parameter LNSPortionAlpha: value " + value + " is not in required range 0..1.");
         workerParams._lnsPortionAlpha = value;
     },
+    // LNSPortionTemperature
+    /** @internal */
+    _setLNSPortionTemperature: function (workerParams, value) {
+        if (value < -1 || value > 1)
+            throw Error("Parameter LNSPortionTemperature: value " + value + " is not in required range -1..1.");
+        workerParams._lnsPortionTemperature = value;
+    },
+    // LNSPortionUniform
+    /** @internal */
+    _setLNSPortionUniform: function (workerParams, value) {
+        workerParams._lnsPortionUniform = value;
+    },
     // LNSPortionInitialQ
     /** @internal */
     _setLNSPortionInitialQ: function (workerParams, value) {
@@ -3540,10 +3613,8 @@ let ParameterCatalog = {
     // LNSPortionHandicapValue
     /** @internal */
     _setLNSPortionHandicapValue: function (workerParams, value) {
-        if (!Number.isInteger(value))
-            throw Error("Parameter LNSPortionHandicapValue: value " + value + " is not an integer.");
-        if (value < 0 || value > 100)
-            throw Error("Parameter LNSPortionHandicapValue: value " + value + " is not in required range 0..100.");
+        if (value < 0 || value > 1)
+            throw Error("Parameter LNSPortionHandicapValue: value " + value + " is not in required range 0..1.");
         workerParams._lnsPortionHandicapValue = value;
     },
     // LNSPortionHandicapInitialQ
@@ -3576,6 +3647,18 @@ let ParameterCatalog = {
             throw Error("Parameter LNSNeighborhoodAlpha: value " + value + " is not in required range 0..1.");
         workerParams._lnsNeighborhoodAlpha = value;
     },
+    // LNSNeighborhoodTemperature
+    /** @internal */
+    _setLNSNeighborhoodTemperature: function (workerParams, value) {
+        if (value < -1 || value > 1)
+            throw Error("Parameter LNSNeighborhoodTemperature: value " + value + " is not in required range -1..1.");
+        workerParams._lnsNeighborhoodTemperature = value;
+    },
+    // LNSNeighborhoodUniform
+    /** @internal */
+    _setLNSNeighborhoodUniform: function (workerParams, value) {
+        workerParams._lnsNeighborhoodUniform = value;
+    },
     // LNSNeighborhoodInitialQ
     /** @internal */
     _setLNSNeighborhoodInitialQ: function (workerParams, value) {
@@ -3598,6 +3681,11 @@ let ParameterCatalog = {
         if (value < 0.000000 || value > Infinity)
             throw Error("Parameter LNSDivingFailLimitRatio: value " + value + " is not in required range 0.000000..Infinity.");
         workerParams._lnsDivingFailLimitRatio = value;
+    },
+    // LNSLearningRun
+    /** @internal */
+    _setLNSLearningRun: function (workerParams, value) {
+        workerParams._lnsLearningRun = value;
     },
     // SimpleLBWorker
     setSimpleLBWorker: function (workerParams, value) {
@@ -3787,16 +3875,6 @@ let ParameterCatalog = {
     _setLNSTrainingObjectiveLimit: function (workerParams, value) {
         workerParams._lnsTrainingObjectiveLimit = value;
     },
-    // LNSWeakerPOS
-    /** @internal */
-    _setLNSWeakerPOS: function (workerParams, value) {
-        workerParams._lnsWeakerPOS = value;
-    },
-    // LNSDontRelinkPOS
-    /** @internal */
-    _setLNSDontRelinkPOS: function (workerParams, value) {
-        workerParams._lnsDontRelinkPOS = value;
-    },
     // DefaultCallbackBlockSize
     /** @internal */
     _setDefaultCallbackBlockSize: function (workerParams, value) {
@@ -3805,6 +3883,11 @@ let ParameterCatalog = {
         if (value < 0 || value > 4294967295)
             throw Error("Parameter DefaultCallbackBlockSize: value " + value + " is not in required range 0..4294967295.");
         workerParams._defaultCallbackBlockSize = value;
+    },
+    // UseReservoirPegging
+    /** @internal */
+    _setUseReservoirPegging: function (workerParams, value) {
+        workerParams._useReservoirPegging = value;
     },
 };
 /** @internal */
@@ -3855,6 +3938,11 @@ let parserConfig = {
         name: 'VerifySolutions',
         parse: ParseBool,
         setGlobally: ParameterCatalog.setVerifySolutions,
+    },
+    verifyexternalsolutions: {
+        name: 'VerifyExternalSolutions',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog.setVerifyExternalSolutions,
     },
     allocationblocksize: {
         name: 'AllocationBlockSize',
@@ -3912,6 +4000,11 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setRelativeGapTolerance,
     },
+    tagsfromnames: {
+        name: 'TagsFromNames',
+        parse: ParseString,
+        setGlobally: ParameterCatalog.setTagsFromNames,
+    },
     nooverlappropagationlevel: {
         name: 'NoOverlapPropagationLevel',
         parse: ParseNumber,
@@ -3946,6 +4039,18 @@ let parserConfig = {
         name: 'UsePrecedenceEnergy',
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setUsePrecedenceEnergy,
+    },
+    packpropagationlevel: {
+        name: 'PackPropagationLevel',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setPackPropagationLevel,
+        setOnWorker: ParameterCatalog.setPackPropagationLevel,
+    },
+    itvmappingpropagationlevel: {
+        name: 'ItvMappingPropagationLevel',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setItvMappingPropagationLevel,
+        setOnWorker: ParameterCatalog.setItvMappingPropagationLevel,
     },
     searchtracelevel: {
         name: 'SearchTraceLevel',
@@ -4258,29 +4363,17 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSApplyCutProbability,
         setOnWorker: ParameterCatalog._setLNSApplyCutProbability,
     },
-    lnsdiscreteposalgorithm: {
-        name: 'LNSDiscretePOSAlgorithm',
-        parse: ParseNumber,
-        setGlobally: ParameterCatalog._setLNSDiscretePOSAlgorithm,
-        setOnWorker: ParameterCatalog._setLNSDiscretePOSAlgorithm,
-    },
-    lnsreservoirposalgorithm: {
-        name: 'LNSReservoirPOSAlgorithm',
-        parse: ParseNumber,
-        setGlobally: ParameterCatalog._setLNSReservoirPOSAlgorithm,
-        setOnWorker: ParameterCatalog._setLNSReservoirPOSAlgorithm,
-    },
     lnssmallstructurelimit: {
         name: 'LNSSmallStructureLimit',
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setLNSSmallStructureLimit,
         setOnWorker: ParameterCatalog._setLNSSmallStructureLimit,
     },
-    lnsstructurealternativelimit: {
-        name: 'LNSStructureAlternativeLimit',
-        parse: ParseNumber,
-        setGlobally: ParameterCatalog._setLNSStructureAlternativeLimit,
-        setOnWorker: ParameterCatalog._setLNSStructureAlternativeLimit,
+    lnsresourceoptimization: {
+        name: 'LNSResourceOptimization',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSResourceOptimization,
+        setOnWorker: ParameterCatalog._setLNSResourceOptimization,
     },
     lnsheuristicsepsilon: {
         name: 'LNSHeuristicsEpsilon',
@@ -4293,6 +4386,18 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setLNSHeuristicsAlpha,
         setOnWorker: ParameterCatalog._setLNSHeuristicsAlpha,
+    },
+    lnsheuristicstemperature: {
+        name: 'LNSHeuristicsTemperature',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSHeuristicsTemperature,
+        setOnWorker: ParameterCatalog._setLNSHeuristicsTemperature,
+    },
+    lnsheuristicsuniform: {
+        name: 'LNSHeuristicsUniform',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSHeuristicsUniform,
+        setOnWorker: ParameterCatalog._setLNSHeuristicsUniform,
     },
     lnsheuristicsinitialq: {
         name: 'LNSHeuristicsInitialQ',
@@ -4311,6 +4416,18 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setLNSPortionAlpha,
         setOnWorker: ParameterCatalog._setLNSPortionAlpha,
+    },
+    lnsportiontemperature: {
+        name: 'LNSPortionTemperature',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSPortionTemperature,
+        setOnWorker: ParameterCatalog._setLNSPortionTemperature,
+    },
+    lnsportionuniform: {
+        name: 'LNSPortionUniform',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSPortionUniform,
+        setOnWorker: ParameterCatalog._setLNSPortionUniform,
     },
     lnsportioninitialq: {
         name: 'LNSPortionInitialQ',
@@ -4354,6 +4471,18 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSNeighborhoodAlpha,
         setOnWorker: ParameterCatalog._setLNSNeighborhoodAlpha,
     },
+    lnsneighborhoodtemperature: {
+        name: 'LNSNeighborhoodTemperature',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodTemperature,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodTemperature,
+    },
+    lnsneighborhooduniform: {
+        name: 'LNSNeighborhoodUniform',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSNeighborhoodUniform,
+        setOnWorker: ParameterCatalog._setLNSNeighborhoodUniform,
+    },
     lnsneighborhoodinitialq: {
         name: 'LNSNeighborhoodInitialQ',
         parse: ParseNumber,
@@ -4371,6 +4500,12 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setLNSDivingFailLimitRatio,
         setOnWorker: ParameterCatalog._setLNSDivingFailLimitRatio,
+    },
+    lnslearningrun: {
+        name: 'LNSLearningRun',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSLearningRun,
+        setOnWorker: ParameterCatalog._setLNSLearningRun,
     },
     simplelbworker: {
         name: 'SimpleLBWorker',
@@ -4509,23 +4644,17 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSTrainingObjectiveLimit,
         setOnWorker: ParameterCatalog._setLNSTrainingObjectiveLimit,
     },
-    lnsweakerpos: {
-        name: 'LNSWeakerPOS',
-        parse: ParseBool,
-        setGlobally: ParameterCatalog._setLNSWeakerPOS,
-        setOnWorker: ParameterCatalog._setLNSWeakerPOS,
-    },
-    lnsdontrelinkpos: {
-        name: 'LNSDontRelinkPOS',
-        parse: ParseBool,
-        setGlobally: ParameterCatalog._setLNSDontRelinkPOS,
-        setOnWorker: ParameterCatalog._setLNSDontRelinkPOS,
-    },
     defaultcallbackblocksize: {
         name: 'DefaultCallbackBlockSize',
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setDefaultCallbackBlockSize,
         setOnWorker: ParameterCatalog._setDefaultCallbackBlockSize,
+    },
+    usereservoirpegging: {
+        name: 'UseReservoirPegging',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setUseReservoirPegging,
+        setOnWorker: ParameterCatalog._setUseReservoirPegging,
     },
 };
 /** @internal */
@@ -4559,11 +4688,14 @@ class ParameterParser {
         // Remove '--' at the beginning of the parameter name:
         let opt = name.slice(2).toLowerCase();
         let workerRange = undefined;
-        if (opt.startsWith("worker") && opt[6] >= '0' && opt[6] <= '9') {
-            // Syntax is, for example:
-            //   --worker3.searchType
-            //   --worker0-3.searchType
+        // Syntax is, for example:
+        //   --worker3.searchType
+        //   --worker0-3.searchType
+        //   --workers0-3.searchType
+        if (opt.match(/^worker[s]?[0-9]/)) {
             opt = opt.slice(6);
+            if (opt[0] == 's')
+                opt = opt.slice(1);
             let dotPosition = opt.indexOf(".");
             if (dotPosition == -1)
                 throw Error("Invalid worker specification: " + name);
@@ -4662,7 +4794,7 @@ class ParameterParser {
  * Note that in the evaluation version of OptalCP, the values of variables in
  * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
  *
- * @category Solving
+ * @group Solving
  */
 export class Solution {
     #values;
@@ -4696,12 +4828,15 @@ export class Solution {
     getObjective() { return this.#objective; }
     /** @internal */
     isPresent(variable) {
+        assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         return this.#values[variable._getId()] !== null;
     }
     isAbsent(variable) {
+        assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         return this.#values[variable._getId()] === null;
     }
     getValue(variable) {
+        assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         let result = this.#values[variable._getId()];
         if (!(variable instanceof BoolVar))
             return result;
@@ -4745,9 +4880,11 @@ export class Solution {
      */
     setObjective(value) { this.#objective = value; }
     setAbsent(variable) {
+        assert(!variable._getProps().func.startsWith("_")); // Can't set values of auxiliary variables
         this.#values[variable._getId()] = null;
     }
     setValue(variable, ...args) {
+        assert(!variable._getProps().func.startsWith("_")); // Can't set values of auxiliary variables
         if (variable instanceof IntervalVar)
             this.#values[variable._getId()] = { start: args[0], end: args[1] };
         else
@@ -4778,7 +4915,7 @@ export class Solution {
  * For each variable, this class provides a way to query the computed domain,
  * e.g. using function {@link ModelDomains.getStartMin}.
  *
- * @category Propagation
+ * @group Propagation
  */
 export class ModelDomains {
     #domains;
@@ -4790,18 +4927,22 @@ export class ModelDomains {
     }
     /** @internal */
     isPresent(v) {
+        assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         return this.#domains[v._getId()].presence == 1 /* PresenceStatus.Present */;
     }
     /** @internal */
     isAbsent(v) {
+        assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         return this.#domains[v._getId()].presence == 2 /* PresenceStatus.Absent */;
     }
     /** @internal */
     isOptional(v) {
+        assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         return this.#domains[v._getId()].presence == 0 /* PresenceStatus.Optional */;
     }
     /** @internal */
     getMin(v) {
+        assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         const domain = this.#domains[v._getId()];
         if (domain.presence === 2 /* PresenceStatus.Absent */)
             return null;
@@ -4809,6 +4950,7 @@ export class ModelDomains {
     }
     /** @internal */
     getMax(v) {
+        assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         const domain = this.#domains[v._getId()];
         if (domain.presence === 2 /* PresenceStatus.Absent */)
             return null;
@@ -4969,6 +5111,14 @@ export class ModelDomains {
  * * {@link cumulGe}: greater than or equal to a constant.
  * * {@link cumulLe}: less than or equal to a constant.
  *
+ * #### Mapping/batching
+ *
+ * * {@link itvMapping}: map tasks (interval variables) to slots (other interval variables).
+ *
+ * #### Constraints on integer variables/expressions
+ *
+ * * {@link pack}: pack items of various sizes into a set of bins.
+ *
  * #### Objective
  *
  * * {@link minimize}: minimize an integer expression.
@@ -5053,7 +5203,7 @@ export class ModelDomains {
  * @see {@link Solution}
  * @see {@link Solver}
  *
- * @category Modeling
+ * @group Modeling
  */
 export class Model {
     #model = [];
@@ -5169,7 +5319,8 @@ export class Model {
     /**
     * Creates an expression that replaces value _absent_ by a constant.
     *
-    * @remarksThe resulting expression is:
+    * @remarks
+    * The resulting expression is:
     *
     * * equal to `arg` if `arg` is _present_
     * * and equal to `absentValue` otherwise (i.e. when `arg` is _absent_).
@@ -5343,7 +5494,8 @@ export class Model {
     /**
     * Creates Boolean expression `arg1` &ge; `arg2`.
     *
-    * @remarksIf one of the arguments has value _absent_, then the resulting expression also has value _absent_.
+    * @remarks
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5715,18 +5867,22 @@ export class Model {
         const result = new FloatExpr(this, "floatElement", outParams);
         return result;
     }
+    /** @internal */
     lexLe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexLe", outParams);
     }
+    /** @internal */
     lexLt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexLt", outParams);
     }
+    /** @internal */
     lexGe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexGe", outParams);
     }
+    /** @internal */
     lexGt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
         const result = new Constraint(this, "intLexGt", outParams);
@@ -6133,6 +6289,88 @@ export class Model {
     alternative(main, options) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options)];
         const result = new Constraint(this, "alternative", outParams);
+    }
+    /** @internal */
+    intervalVarElement(slots, index, value) {
+        let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
+        const result = new Constraint(this, "intervalVarElement", outParams);
+        this.constraint(result);
+    }
+    /** @internal */
+    increasingIntervalVarElement(slots, index, value) {
+        let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
+        const result = new Constraint(this, "increasingIntervalVarElement", outParams);
+        this.constraint(result);
+    }
+    /**
+    *
+    * Map `tasks` on `slots` according to the `indices` array.
+    *
+    * @param tasks Array of interval variables to map.
+    * @param slots Array of interval variables to map to.
+    * @param indices Array of integer expressions that specify the mapping (of the same length as `tasks`).
+    *
+    * @remarks
+    *
+    * Each task is synchronized with the slot it is assigned to. Multiple tasks can be
+    * assigned to the same slot. A slot without any task is _absent_. Absent tasks are
+    * not assigned to any slot (their index value is _absent_).  Slots are sorted by
+    * both start and end. Absent slots are at the end of the array.
+    *
+    * The constraint can be used to form batches of synchronized tasks (so-called
+    * _p-batching_). In this case `slots` corresponds to batches. The size of the
+    * batches can be limited using, e.g., {@link Model.pack} constraint.
+    *
+    * #### Formal definition
+    *
+    * Let $T$ be the number of tasks (the length of the
+    * array `tasks`). The number of the indices must also be $T$ (arrays `tasks` and
+    * `indices` must have the same length).  Let `tasks[t]` be one of the tasks, i.e.,
+    * $\mathtt{t} \in \{0,1,\dots T-1\}$. Then `indices[t]` is the index of the slot
+    * the task `tasks[t]` is assigned to.  Only present tasks are assigned:
+    * $$
+    * \mathtt{
+    *   \forall t \in \mathrm{0,\dots,T-1:} \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
+    * }
+    * $$
+    * Each task is synchronized with the slot to which it is assigned:
+    * $$
+    * \begin{aligned}
+    * \mathtt{\forall t \in \mathrm{0,\dots,T-1} \text{ such that } tasks[t] \ne \text{absent:}} \\
+    *     \mathtt{slots[indices[t]]} &\ne \textrm{absent} \\
+    *     \mathtt{startOf(tasks[t])} &= \mathtt{startOf(slots[indices[t]]) }\\
+    *     \mathtt{endOf(tasks[t])} &= \mathtt{endOf(slots[indices[t]])}
+    * \end{aligned}
+    * $$
+    * A slot is present if and only if there is a task assigned to it:
+    * $$
+    * \forall \mathtt{s} \in 0,\dots,S-1:\;
+    * \mathtt{presenceOf(tasks[s])} \;\Leftrightarrow\; (\exists \mathtt{t} \in 0,\dots,T-1: \mathtt{indices[t]=s})
+    * $$
+    * Absent slots are positioned at the end of the array:
+    * $$
+    * \mathtt{
+    *    \forall s \in \mathrm{1,\dots,S-1}:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
+    * }
+    * $$
+    * Present slots are sorted by both start and end:
+    * $$
+    * \begin{aligned}
+    * \mathtt{\forall s \in \mathrm{1,\dots,S-1} \text{ such that } slots[s] \ne \text{absent:}} \\
+    *     \mathtt{startOf(slots[s-1])} &\le \mathtt{startOf(slots[s]) }
+    *     \\
+    *     \mathtt{endOf(slots[s-1])} &\le \mathtt{endOf(slots[s])}
+    * \end{aligned}
+    * $$
+    *
+    * The amount of the propagation for this constraint can be controlled by parameter
+    * {@link Parameters.packPropagationLevel}.
+    *
+    * @see {@link Model.pack} for limiting the amount of tasks assigned to a slot.
+    *  */
+    itvMapping(tasks, slots, indices) {
+        let outParams = [this._getIntervalVarArray(tasks), this._getIntervalVarArray(slots), this._getIntExprArray(indices)];
+        const result = new Constraint(this, "itvMapping", outParams);
     }
     /**
     * Constraints an interval variable to span (cover) a set of other interval variables.
@@ -6721,7 +6959,7 @@ export class Model {
     * This function is equivalent to:
     *
     * ```
-    *   model.constraint(model.ne(model.intStepFunctionEval(func, interval.start()), 0));
+    *   model.constraint(model.ne(model.stepFunctionEval(func, interval.start()), 0));
     * ```
     *
     * I.e., the function value at the start of the interval variable cannot be zero.
@@ -6780,6 +7018,11 @@ export class Model {
     _startBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
         const result = new Constraint(this, "startBeforeStartChain", outParams);
+    }
+    /** @internal */
+    _endBeforeEndChain(intervals) {
+        let outParams = [this._getIntervalVarArray(intervals)];
+        const result = new Constraint(this, "endBeforeEndChain", outParams);
     }
     /** @internal */
     _decisionPresentIntVar(variable, isLeft) {
@@ -6887,6 +7130,11 @@ export class Model {
         let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
         const result = new Blank(this, "related", outParams);
     }
+    /** @internal */
+    pack(load, where, sizes) {
+        let outParams = [this._getIntExprArray(load), this._getIntExprArray(where), this._getIntArray(sizes)];
+        const result = new Constraint(this, "pack", outParams);
+    }
     noOverlap(seq, transitions) {
         if (Array.isArray(seq))
             seq = this.auxiliarySequenceVar(seq);
@@ -6937,23 +7185,20 @@ export class Model {
     floatConst(value) {
         return new FloatExpr(this, "floatConst", [GetFloat(value)]);
     }
-    boolVar(arg) {
+    /** @internal */
+    boolVar(params = {}) {
         const x = new BoolVar(this);
-        if (typeof arg == "string")
-            x.setName(arg);
-        else if (typeof arg == "object") {
-            if (arg.name)
-                x.setName(arg.name);
-            if (arg.optional)
-                x.makeOptional();
-            if (typeof arg.range === "boolean")
-                x.setRange(arg.range, arg.range);
-            else if (Array.isArray(arg.range)) {
-                if (arg.range[0] !== undefined)
-                    x.setMin(arg.range[0]);
-                if (arg.range[1] !== undefined)
-                    x.setMax(arg.range[1]);
-            }
+        if (params.name)
+            x.setName(params.name);
+        if (params.optional)
+            x.makeOptional();
+        if (typeof params.range === "boolean")
+            x.setRange(+params.range, +params.range);
+        else if (Array.isArray(params.range)) {
+            if (params.range[0] !== undefined)
+                x.setMin(params.range[0]);
+            if (params.range[1] !== undefined)
+                x.setMax(params.range[1]);
         }
         this.#model.push(x._getArg());
         this.#boolVars.push(x);
@@ -6998,7 +7243,7 @@ export class Model {
      * let z = model.intVar({ range: 10, optional: true, name: "z" });
      * ```
      */
-    intVar(params) {
+    intVar(params = {}) {
         const x = new IntVar(this);
         if (params.name)
             x.setName(params.name);
@@ -7016,28 +7261,26 @@ export class Model {
         this.#intVars.push(x);
         return x;
     }
-    auxiliaryIntVar(arg) {
-        let x = this.intVar(arg);
+    /** @internal */
+    auxiliaryIntVar(params) {
+        let x = this.intVar(params);
         x._makeAuxiliary();
         return x;
     }
-    floatVar(arg) {
+    /** @internal */
+    floatVar(params = {}) {
         const x = new FloatVar(this);
-        if (typeof arg === "string")
-            x.setName(arg);
-        else if (typeof arg === "object") {
-            if (arg.name)
-                x.setName(arg.name);
-            if (arg.optional)
-                x.makeOptional();
-            if (typeof arg.range === "number")
-                x.setRange(arg.range, arg.range);
-            else if (Array.isArray(arg.range)) {
-                if (arg.range[0] !== undefined)
-                    x.setMin(arg.range[0]);
-                if (arg.range[1] !== undefined)
-                    x.setMax(arg.range[1]);
-            }
+        if (params.name)
+            x.setName(params.name);
+        if (params.optional)
+            x.makeOptional();
+        if (typeof params.range === "number")
+            x.setRange(params.range, params.range);
+        else if (Array.isArray(params.range)) {
+            if (params.range[0] !== undefined)
+                x.setMin(params.range[0]);
+            if (params.range[1] !== undefined)
+                x.setMax(params.range[1]);
         }
         this.#model.push(x._getArg());
         this.#floatVars.push(x);
@@ -7091,7 +7334,7 @@ export class Model {
      *
      * @see {@link IntervalVar}
      */
-    intervalVar(params) {
+    intervalVar(params = {}) {
         const itv = new IntervalVar(this);
         if (typeof params.start === "number")
             itv.setStart(params.start);
@@ -7388,7 +7631,7 @@ export class Model {
             else {
                 // The expression is going to be used multiple times. Create ref if there isn't any already:
                 if (!primaryObjectiveArg.ref) {
-                    primaryObjectiveArg.ref = this._getNewRefId(primaryObjectiveArg);
+                    primaryObjectiveArg.ref = this._getNewRefId(primaryObjectiveArg.arg);
                     primaryObjectiveArg.arg = undefined;
                 }
                 this.#primaryObjectiveExpr = new IntExpr(this, "reusableIntExpr", [primaryObjectiveArg]);
@@ -7528,6 +7771,8 @@ export class Model {
     }
 }
 /**
+ * @noInheritDoc
+ *
  * The solver provides asynchronous communication with the solver.
  *
  * Unlike function {@link solve}, `Solver` allows the user to process individual events
@@ -7603,8 +7848,7 @@ export class Model {
  * }
  * ```
  *
- * @category Solving
- * @noInheritDoc
+ * @group Solving
  */
 export class Solver extends EventEmitter {
     #solver; // Spawned solver process
@@ -7613,6 +7857,7 @@ export class Solver extends EventEmitter {
     #solverClosed = false;
     #closeExpected = false;
     #initialized = false;
+    #errStreamBuffer = "";
     #hasColors = process.stdout.isTTY;
     #outputStream = process.stdout;
     // Information collected about the solve for SolveResult:
@@ -7750,10 +7995,28 @@ export class Solver extends EventEmitter {
                 this.emit('error', err);
                 this.#closeExpected = true;
             });
-            // Also emit an error if anything appears on stderr:
             this.#solver.stderr.on('data', (data) => {
-                this.emit('error', Error('Error: Solver writes on error stream:\n' + data + '\n'));
-                this.#closeExpected = true;
+                // Messages on stderr typically arrive in multiple chunks.
+                // If we raise an error on the first chunk, then we may not see the
+                // complete error message.
+                // Display everything until the last newline. The part after the last
+                // new line stays buffered for the next chunk.
+                this.#errStreamBuffer += data.toString();
+                let lastNewline = this.#errStreamBuffer.lastIndexOf('\n');
+                if (lastNewline >= 0) {
+                    // We have a complete message in the buffer.
+                    let completeMessage = this.#errStreamBuffer.substring(0, lastNewline + 1);
+                    this.#errStreamBuffer = this.#errStreamBuffer.substring(lastNewline + 1);
+                    // Emit the complete message as a warning.
+                    this.emit('warning', 'Solver writes on error stream:\n' + completeMessage + '\n');
+                    if (this.#outputStream !== null) {
+                        // Prefix every line:
+                        let prefixed = completeMessage.split('\n').map(line => "Solver stderr: " + line + '\n').join('');
+                        this.#outputStream.write(prefixed);
+                    }
+                }
+                // Do not set #closeExpected to true here. We want to continue
+                // reading and raise an error only once the solver dies.
             });
             // We don't react on close event on this.#solver.stdin because it may
             // arrive sooner that summary event. Instead we raise an error if we
@@ -8093,7 +8356,7 @@ export class Solver extends EventEmitter {
  *
  * For an example of using this function, see {@link Model}.
  *
- * @category Solving
+ * @group Solving
  */
 export async function solve(model, params, warmStart, log) {
     let solver = new Solver();
@@ -8113,7 +8376,7 @@ export async function solve(model, params, warmStart, log) {
  * for example.  The problem can be converted back from JSON format into an instance
  * of {@link ProblemDefinition} using function {@link json2problem}.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export function problem2json(problem) {
     return JSON.stringify(problem.model._toObject(problem.parameters, problem.warmStart));
@@ -8130,7 +8393,7 @@ export function problem2json(problem) {
  * Variables in the new model can be accessed using function {@link
  * Model.getIntervalVars | Model.getIntervalVars}.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export function json2problem(json) {
     let data = JSON.parse(json);
@@ -8191,7 +8454,7 @@ export async function _toText(model, cmd, params, warmStart, log = process.stdou
  *
  * In case of an error, this function returns a rejected promise.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export async function problem2txt(model, params, warmStart, log) {
     return _toText(model, "toText", params, warmStart, log);
@@ -8216,7 +8479,7 @@ export async function problem2txt(model, params, warmStart, log) {
  *
  * In case of an error, this function returns a rejected promise.
  *
- * @category Model exporting
+ * @group Model exporting
  * @experimental
  */
 export async function problem2js(model, params, warmStart, log) {
@@ -8363,7 +8626,7 @@ export async function problem2js(model, params, warmStart, log) {
  *
  * As we can see, this model propagates more than the previous one.
  *
- * @category Propagation
+ * @group Propagation
  */
 export async function propagate(model, parameters, log) {
     let solver = new Solver;
@@ -8542,7 +8805,7 @@ export const BenchmarkParametersHelp =
 /**
  * Parse benchmark parameters from command line arguments.
  *
- * @category Benchmarking
+ * @group Benchmarking
  *
  * @param params Input/output argument. Contains default values of parameters
  *               that will be overridden by command line arguments.
@@ -8602,12 +8865,15 @@ export const BenchmarkParametersHelp =
  * ...
  * ```
  *
- * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix,
- * and also for worker ranges using `--workerN-M.` prefix.
+ * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
+ *
+ *  * `--workerN.` or `--workersN.` for worker `N`
+ *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ *
  * For example:
  *
  * * `--worker0.searchType FDS` sets the search type to the first worker only.
- * * `--worker4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
+ * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  *
  * @see {@link parseSomeBenchmarkParameters} for a version that allows unrecognized arguments.
  * @see Functions {@link parseParameters} and {@link parseSomeParameters} for
@@ -8636,7 +8902,7 @@ export function parseBenchmarkParameters(params = {}, args = process.argv.slice(
  * @see {@link parseBenchmarkParameters} for more details.
  * @see {@link parseParameters}, {@link parseSomeParameters} for parsing only solver parameters.
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export function parseSomeBenchmarkParameters(params, args = process.argv.slice(2)) {
     handleHelp(args, params, BenchmarkParametersHelp);
@@ -8698,6 +8964,7 @@ class Benchmarker {
         delete this.#modifications.solve;
         delete this.#modifications.output;
         delete this.#modifications.dontOutputSolutions;
+        delete this.#modifications.usage;
         this.#runs = [];
         let nbSeeds = this.#parameters.nbSeeds ?? 1;
         this.#hasSeedCol = (nbSeeds > 1);
@@ -9072,11 +9339,11 @@ class Benchmarker {
                     config.parameters.logLevel = 0;
                 errContext = "Error while solving the model";
                 let solveResult = await solve(config.model, config.parameters, config.warmStart, logStream);
-                result = { ...solveResult, parameters: config.parameters, modelName: config.name, solveDate: new Date(), error: undefined };
                 // Restore old logLevel for the case we call export below:
                 config.parameters.logLevel = oldLogLevel;
+                result = { ...solveResult, parameters: config.parameters, modelName: config.name, solveDate: new Date(), error: undefined };
             }
-            // Exports are done after solve so it can contain solution as warm start:
+            // Exports are done after solve so it can contain solution as a warm start:
             if (config.exportJSON !== undefined) {
                 errContext = "Cannot export JSON model into file '" + config.exportJSON + "': ";
                 await fs.promises.writeFile(config.exportJSON, problem2json({ model: config.model, parameters: config.parameters, warmStart: result.bestSolution }));
@@ -9350,7 +9617,7 @@ class Benchmarker {
  * runs will be stored in the directory `logs` (one file for each run named
  * after the model, see {@link Model.setName | Model.setName}.
  *
- * @category Benchmarking
+ * @group Benchmarking
  *
  */
 export async function benchmark(problemGenerator, inputs, params) {

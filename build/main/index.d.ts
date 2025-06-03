@@ -1,20 +1,11 @@
-/**
- * Copyright (C) CoEnzyme SAS - All Rights Reserved
- *
- * This source code is protected under international copyright law.  All rights
- * reserved and protected by the copyright holders.
- * This file is confidential and only available to authorized individuals with the
- * permission of the copyright holders.  If you encounter this file and do not have
- * permission, please contact the copyright holders and delete this file.
- */
 /// <reference types="node" />
 /// <reference types="node" />
 import { EventEmitter } from 'node:events';
 /**
  * The version of the module, such as "1.0.0".
- * @category Constants
+ * @group Constants
  */
-export declare const Version = "2024.11.1";
+export declare const Version = "2025.6.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -56,30 +47,30 @@ interface NodeProps {
  * ```
  * Because for any value of `x`, the expression `x*x` is greater than `IntVarMax` and thus cannot be computed.
  *
- * @category Constants
+ * @group Constants
  */
 export declare const IntVarMax = 1073741823;
 /**
  * Minimum value of a decision variable or a decision expression (such as `x+1` where `x` is a variable).
  * The opposite of {@link IntVarMax}.
- * @category Constants
+ * @group Constants
  */
 export declare const IntVarMin: number;
 /**
  * Maximum value of start or end of an interval variable. The opposite of {@link IntervalMin}.
- * @category Constants
+ * @group Constants
  */
 export declare const IntervalMax = 715827882;
 /**
  * Minimum value of start or end of an interval variable. The opposite of {@link IntervalMax}.
- * @category Constants
+ * @group Constants
  */
 export declare const IntervalMin = -715827882;
 /**
  * Maximum length of an interval variable. The maximum length can be achieved by
  * an interval that starts at {@link IntervalMin} and ends at {@link
  * IntervalMax}.
- * @category Constants
+ * @group Constants
  */
 export declare const LengthMax: number;
 /** @internal */
@@ -95,7 +86,7 @@ export declare const FloatVarMin: number;
  * @see {@link SolveSummary}
  * @see {@link Solver.on | Solver.on("summary", ...)}
  *
- * @category Solving
+ * @group Solving
  */
 export type SolveSummary = {
     /** Number of solutions found during the solve. */
@@ -151,7 +142,7 @@ export type SolveSummary = {
  *
  * Any modeling object can be assigned a name, see {@link ModelNode#setName} and {@link ModelNode#getName}.
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare abstract class ModelNode {
     #private;
@@ -215,7 +206,7 @@ declare class Constraint extends ModelNode {
  * A class representing floating-point expression in the model.
  * Currently, there is no way to create floating-point expressions.
  * The class is only a base class for {@link IntExpr}.
- * @category Modeling
+ * @group Modeling
  */
 export declare class FloatExpr extends ModelNode {
     #private;
@@ -326,7 +317,7 @@ export declare class FloatExpr extends ModelNode {
  *    is at least 10. In this case, `isBefore` is _true_.
  * 2. `x` is absent and `y` is present. In this case, `isBefore` is _absent_.
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class IntExpr extends FloatExpr {
     #private;
@@ -629,7 +620,7 @@ export declare class IntExpr extends FloatExpr {
  * as integer expressions. In this case, _true_ is equal to _1_, _false_ is
  * equal to _0_, and _absent_ remains _absent_.
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class BoolExpr extends IntExpr {
     #private;
@@ -711,7 +702,7 @@ export declare class Objective extends ModelNode {
  * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
  * ```
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class IntVar extends IntExpr {
     /** @internal */
@@ -841,7 +832,7 @@ export declare class BoolVar extends BoolExpr {
  * model.noOverlap([... , XB, ...]);
  * ```
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class IntervalVar extends ModelNode {
     #private;
@@ -1585,6 +1576,8 @@ export declare class IntervalVar extends ModelNode {
  * and allows additional constraints on the order to be stated.
  *
  * @see {@link Model.position}.
+ *
+ * @group Modeling
  */
 export declare class SequenceVar extends ModelNode {
     #private;
@@ -1737,7 +1730,7 @@ export declare class SequenceVar extends ModelNode {
  *
  * See {@link Model.cumulLe} and {@link Model.cumulGe} for examples.
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class CumulExpr extends ModelNode {
     #private;
@@ -1795,7 +1788,7 @@ export declare class CumulExpr extends ModelNode {
  *
  * Integer step function is a piecewise constant function defined on integer
  * values in range {@link IntVarMin} to {@link IntVarMax}. The function can be
- * created by {@link Model.intStepFunction}.
+ * created by {@link Model.stepFunction}.
  *
  * Step functions can be used in the following ways:
  *
@@ -1804,7 +1797,7 @@ export declare class CumulExpr extends ModelNode {
  *   * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
  *   * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class IntStepFunction extends ModelNode {
     #private;
@@ -1854,7 +1847,7 @@ declare class SearchDecision extends ModelNode {
  * Parameters}}), not per worker.  For example, _timeLimit_ or _logPeriod_ are
  * global parameters.
  *
- * @category Parameters
+ * @group Parameters
  */
 export type WorkerParameters = {
     /**
@@ -1878,7 +1871,7 @@ export type WorkerParameters = {
     *
     * Note that when {@link Parameters.nbWorkers} is more than 1 then there is also another source of randomness: the time it takes for a message to pass from one worker to another. Therefore with {@link Parameters.nbWorkers}=1 the solver is deterministic (random behavior depends only on random seed). With {@link Parameters.nbWorkers}>1 the solver is not deterministic.
     *
-    * Even with {@link NbSeeds}=1 and the same random seed, the solver may behave differently on different platforms. This can be due to different implementations of certain functions such as `std::sort`.
+    * Even with the same random seed, the solver may behave differently on different platforms. This can be due to different implementations of certain functions such as `std::sort`.
     *
     * The parameter takes an unsigned integer value.
     * The default value is `1`.
@@ -2019,6 +2012,34 @@ export type WorkerParameters = {
     * The default value is `1`.
     */
     stepFunctionSumPropagationLevel?: number;
+    /**
+    * How much to propagate pack constraints.
+    *
+    * This parameter controls the amount of propagation done for {@link Model.pack} constraints.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * More propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `1..2`.
+    * The default value is `1`.
+    */
+    packPropagationLevel?: number;
+    /**
+    * How much to propagate itvMapping constraint.
+    *
+    * This parameter controls the amount of propagation done for {@link Model.itvMapping} constraint.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * More propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `1..2`.
+    * The default value is `1`.
+    */
+    itvMappingPropagationLevel?: number;
     /**
     * Level of search trace.
     *
@@ -2370,12 +2391,12 @@ export type WorkerParameters = {
     *
     * Possible values are:
     *
-    * * `Minimum`: Always change the cut by the minimum amount. The default value.
-    * * `Random`: At each restart, randomly choose a value in range LB..UB.
+    * * `Minimum`: Always change the cut by the minimum amount.
+    * * `Random`: At each restart, randomly choose a value in range LB..UB. The default.
     * * `Split`: Always split the current range LB..UB in half.
     *
     *
-    * The default value is `Minimum`.
+    * The default value is `Random`.
     */
     fdsLBStrategy?: "Minimum" | "Random" | "Split";
     /**
@@ -2537,26 +2558,6 @@ export type WorkerParameters = {
     _lnsApplyCutProbability?: number;
     /**
     *  @internal
-    * What POS generation algorithm to use for discrete resource.
-    *
-    * blah blah
-    *
-    * The parameter takes an unsigned integer value  in range `0..1`.
-    * The default value is `0`.
-    */
-    _lnsDiscretePOSAlgorithm?: number;
-    /**
-    *  @internal
-    * What POS generation algorithm to use for reservoir.
-    *
-    * blah blah
-    *
-    * The parameter takes an unsigned integer value  in range `0..1`.
-    * The default value is `0`.
-    */
-    _lnsReservoirPOSAlgorithm?: number;
-    /**
-    *  @internal
     * Maximum size of a model part considered for structure detection.
     *
     * blah blah
@@ -2567,14 +2568,13 @@ export type WorkerParameters = {
     _lnsSmallStructureLimit?: number;
     /**
     *  @internal
-    * Maximum size of an alternative with for O(n^2) structure links.
+    * Whether to minimize resources in LNS steps.
     *
     * blah blah
     *
-    * The parameter takes an unsigned integer value.
-    * The default value is `0`.
+    * The default value is `true`.
     */
-    _lnsStructureAlternativeLimit?: number;
+    _lnsResourceOptimization?: boolean;
     /**
     *  @internal
     * Probability to chose heuristics randomly.
@@ -2595,6 +2595,25 @@ export type WorkerParameters = {
     * The default value is `0.1`.
     */
     _lnsHeuristicsAlpha?: number;
+    /**
+    *  @internal
+    * Temperature for heuristics SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsHeuristicsTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose heuristics uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsHeuristicsUniform?: boolean;
     /**
     *  @internal
     * Initial Q-values of all heuristics.
@@ -2627,6 +2646,25 @@ export type WorkerParameters = {
     _lnsPortionAlpha?: number;
     /**
     *  @internal
+    * Temperature for portions SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsPortionTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose portions uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsPortionUniform?: boolean;
+    /**
+    *  @internal
     * Initial Q-values of portions to relax.
     *
     * blah blah
@@ -2651,8 +2689,8 @@ export type WorkerParameters = {
     *
     * blah blah
     *
-    * The parameter takes an unsigned integer value  in range `0..100`.
-    * The default value is `10`.
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.1`.
     */
     _lnsPortionHandicapValue?: number;
     /**
@@ -2697,6 +2735,25 @@ export type WorkerParameters = {
     _lnsNeighborhoodAlpha?: number;
     /**
     *  @internal
+    * Temperature for neighborhoods SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsNeighborhoodTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose neighborhoods uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsNeighborhoodUniform?: boolean;
+    /**
+    *  @internal
     * Initial Q-values of neighborhoods.
     *
     * blah blah
@@ -2725,6 +2782,15 @@ export type WorkerParameters = {
     * The default value is `1`.
     */
     _lnsDivingFailLimitRatio?: number;
+    /**
+    *  @internal
+    * Dump learning data.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsLearningRun?: boolean;
     /**
     * Which worker computes simple lower bound.
     *
@@ -2961,24 +3027,6 @@ export type WorkerParameters = {
     _lnsTrainingObjectiveLimit?: number;
     /**
     *  @internal
-    * Whether to ignore non-touching tasks when generating POS.
-    *
-    *
-    *
-    * The default value is `false`.
-    */
-    _lnsWeakerPOS?: boolean;
-    /**
-    *  @internal
-    * Do not relink POS when an interval variable is relaxed.
-    *
-    *
-    *
-    * The default value is `false`.
-    */
-    _lnsDontRelinkPOS?: boolean;
-    /**
-    *  @internal
     * Default size of CallbackBlock. Must be multiple of 8..
     *
     *
@@ -2987,6 +3035,15 @@ export type WorkerParameters = {
     * The default value is `128`.
     */
     _defaultCallbackBlockSize?: number;
+    /**
+    *  @internal
+    * Whether to peg reservoir during SetTimes search.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _useReservoirPegging?: boolean;
 };
 /**
  * Parameters specify how the solver should behave.  For example, the
@@ -3056,7 +3113,7 @@ export type WorkerParameters = {
  * benchmarking (e.g., run the same model multiple times with different random
  * seeds).
  *
- * @category Parameters
+ * @group Parameters
  */
 export type Parameters = {
     /**
@@ -3140,7 +3197,7 @@ export type Parameters = {
     *
     * Note that when {@link Parameters.nbWorkers} is more than 1 then there is also another source of randomness: the time it takes for a message to pass from one worker to another. Therefore with {@link Parameters.nbWorkers}=1 the solver is deterministic (random behavior depends only on random seed). With {@link Parameters.nbWorkers}>1 the solver is not deterministic.
     *
-    * Even with {@link NbSeeds}=1 and the same random seed, the solver may behave differently on different platforms. This can be due to different implementations of certain functions such as `std::sort`.
+    * Even with the same random seed, the solver may behave differently on different platforms. This can be due to different implementations of certain functions such as `std::sort`.
     *
     * The parameter takes an unsigned integer value.
     * The default value is `1`.
@@ -3182,6 +3239,14 @@ export type Parameters = {
     * The default value is `false`.
     */
     verifySolutions?: boolean;
+    /**
+    * Whether to verify corectness of external solutions.
+    *
+    * External solutions can be passed to the solver as a `warmStart` before the search starts, or using `{@link Solver.sendSolution}` during the search. Normally, all external solutions are checked before they are used. However, the check may be time consuming, especially if too many external solutions are sent simultaneously. This parameter allows to turn the check off.
+    *
+    * The default value is `true`.
+    */
+    verifyExternalSolutions?: boolean;
     /**
     * The minimal amount of memory in kB for a single allocation.
     *
@@ -3290,6 +3355,22 @@ export type Parameters = {
     */
     relativeGapTolerance?: number;
     /**
+    * Whether to derive tags from names.
+    *
+    * Tags can be derived from the prefix of names used in the model.
+    * The prefix stops with the first non-alpha character.
+    * Possible values are:
+    *
+    * *  `never`: don't derive tags from names.
+    * *  `auto`: derive tags from names if no user tags are given (the default).
+    * *  `merge`: derive tag if there is a name but not a tag.
+    * *  `force`: ignore user-defined tags, use derived tags instead.
+    *
+    *
+    * The default value is `Auto`.
+    */
+    tagsFromNames?: "Never" | "Auto" | "Merge" | "Force";
+    /**
     * How much to propagate noOverlap constraints.
     *
     * This parameter controls the amount of propagation done for noOverlap constraints.
@@ -3370,6 +3451,34 @@ export type Parameters = {
     * The default value is `0`.
     */
     usePrecedenceEnergy?: number;
+    /**
+    * How much to propagate pack constraints.
+    *
+    * This parameter controls the amount of propagation done for {@link Model.pack} constraints.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * More propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `1..2`.
+    * The default value is `1`.
+    */
+    packPropagationLevel?: number;
+    /**
+    * How much to propagate itvMapping constraint.
+    *
+    * This parameter controls the amount of propagation done for {@link Model.itvMapping} constraint.
+    * The bigger the value, the more algorithms are used for propagation.
+    * It means that more time is spent by the propagation, and possibly more values are removed from domains.
+    * More propagation doesn't necessarily mean better performance.
+    * FDS search (see {@link searchType}) usually benefits from higher propagation levels.
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `1..2`.
+    * The default value is `1`.
+    */
+    itvMappingPropagationLevel?: number;
     /**
     * Level of search trace.
     *
@@ -3734,12 +3843,12 @@ export type Parameters = {
     *
     * Possible values are:
     *
-    * * `Minimum`: Always change the cut by the minimum amount. The default value.
-    * * `Random`: At each restart, randomly choose a value in range LB..UB.
+    * * `Minimum`: Always change the cut by the minimum amount.
+    * * `Random`: At each restart, randomly choose a value in range LB..UB. The default.
     * * `Split`: Always split the current range LB..UB in half.
     *
     *
-    * The default value is `Minimum`.
+    * The default value is `Random`.
     */
     fdsLBStrategy?: "Minimum" | "Random" | "Split";
     /**
@@ -3901,26 +4010,6 @@ export type Parameters = {
     _lnsApplyCutProbability?: number;
     /**
     *  @internal
-    * What POS generation algorithm to use for discrete resource.
-    *
-    * blah blah
-    *
-    * The parameter takes an unsigned integer value  in range `0..1`.
-    * The default value is `0`.
-    */
-    _lnsDiscretePOSAlgorithm?: number;
-    /**
-    *  @internal
-    * What POS generation algorithm to use for reservoir.
-    *
-    * blah blah
-    *
-    * The parameter takes an unsigned integer value  in range `0..1`.
-    * The default value is `0`.
-    */
-    _lnsReservoirPOSAlgorithm?: number;
-    /**
-    *  @internal
     * Maximum size of a model part considered for structure detection.
     *
     * blah blah
@@ -3931,14 +4020,13 @@ export type Parameters = {
     _lnsSmallStructureLimit?: number;
     /**
     *  @internal
-    * Maximum size of an alternative with for O(n^2) structure links.
+    * Whether to minimize resources in LNS steps.
     *
     * blah blah
     *
-    * The parameter takes an unsigned integer value.
-    * The default value is `0`.
+    * The default value is `true`.
     */
-    _lnsStructureAlternativeLimit?: number;
+    _lnsResourceOptimization?: boolean;
     /**
     *  @internal
     * Probability to chose heuristics randomly.
@@ -3959,6 +4047,25 @@ export type Parameters = {
     * The default value is `0.1`.
     */
     _lnsHeuristicsAlpha?: number;
+    /**
+    *  @internal
+    * Temperature for heuristics SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsHeuristicsTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose heuristics uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsHeuristicsUniform?: boolean;
     /**
     *  @internal
     * Initial Q-values of all heuristics.
@@ -3991,6 +4098,25 @@ export type Parameters = {
     _lnsPortionAlpha?: number;
     /**
     *  @internal
+    * Temperature for portions SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsPortionTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose portions uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsPortionUniform?: boolean;
+    /**
+    *  @internal
     * Initial Q-values of portions to relax.
     *
     * blah blah
@@ -4015,8 +4141,8 @@ export type Parameters = {
     *
     * blah blah
     *
-    * The parameter takes an unsigned integer value  in range `0..100`.
-    * The default value is `10`.
+    * The parameter takes a floating point value  in range `0..1`.
+    * The default value is `0.1`.
     */
     _lnsPortionHandicapValue?: number;
     /**
@@ -4061,6 +4187,25 @@ export type Parameters = {
     _lnsNeighborhoodAlpha?: number;
     /**
     *  @internal
+    * Temperature for neighborhoods SoftMax bandits.
+    *
+    * When negative, then SoftMax is not used.
+    *
+    * The parameter takes a floating point value  in range `-1..1`.
+    * The default value is `-1`.
+    */
+    _lnsNeighborhoodTemperature?: number;
+    /**
+    *  @internal
+    * Whether to choose neighborhoods uniformly.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsNeighborhoodUniform?: boolean;
+    /**
+    *  @internal
     * Initial Q-values of neighborhoods.
     *
     * blah blah
@@ -4089,6 +4234,15 @@ export type Parameters = {
     * The default value is `1`.
     */
     _lnsDivingFailLimitRatio?: number;
+    /**
+    *  @internal
+    * Dump learning data.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsLearningRun?: boolean;
     /**
     * Which worker computes simple lower bound.
     *
@@ -4335,24 +4489,6 @@ export type Parameters = {
     _lnsTrainingObjectiveLimit?: number;
     /**
     *  @internal
-    * Whether to ignore non-touching tasks when generating POS.
-    *
-    *
-    *
-    * The default value is `false`.
-    */
-    _lnsWeakerPOS?: boolean;
-    /**
-    *  @internal
-    * Do not relink POS when an interval variable is relaxed.
-    *
-    *
-    *
-    * The default value is `false`.
-    */
-    _lnsDontRelinkPOS?: boolean;
-    /**
-    *  @internal
     * Default size of CallbackBlock. Must be multiple of 8..
     *
     *
@@ -4361,6 +4497,15 @@ export type Parameters = {
     * The default value is `128`.
     */
     _defaultCallbackBlockSize?: number;
+    /**
+    *  @internal
+    * Whether to peg reservoir during SetTimes search.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _useReservoirPegging?: boolean;
 };
 /**
  * This function creates a deep copy of the input {@link Parameters} object.
@@ -4370,7 +4515,7 @@ export type Parameters = {
  * @param params The {@link Parameters} object to copy.
  * @returns A deep copy of the input {@link Parameters} object.
  *
- * @category Parameters
+ * @group Parameters
  */
 export declare function copyParameters(params: Parameters): Parameters;
 /**
@@ -4386,6 +4531,8 @@ export declare function copyParameters(params: Parameters): Parameters;
  * object `modifications` is used.
  *
  * Input objects are not modified.
+ *
+ * @group Parameters
  */
 export declare function combineParameters(source: Parameters, modifications: Parameters): Parameters;
 /** @internal */
@@ -4407,7 +4554,7 @@ export declare const ParametersHelp: string;
  * Parameter _params_ is input/output.  It may contain a default setting that will
  * be overwritten during parsing.
  *
- * In case of an error (e.g.
+ * In case of an error (e.g.,
  * unrecognized parameter or an invalid parameter value) the function prints the
  * error an calls `process.exit(1)`.
  *
@@ -4443,7 +4590,15 @@ export declare const ParametersHelp: string;
  * ...
  * ```
  *
- * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
+ * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
+ *
+ *  * `--workerN.` or `--workersN.` for worker `N`
+ *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ *
+ * For example:
+ *
+ * * `--worker0.searchType FDS` sets the search type to the first worker only.
+ * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
  * @see This function does not accept any unrecognized arguments. See function
@@ -4452,7 +4607,7 @@ export declare const ParametersHelp: string;
  * @see See {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    functions that parse {@link BenchmarkParameters}.
  *
- * @category Parameters
+ * @group Parameters
  */
 export declare function parseParameters(params?: Parameters, args?: string[]): Parameters;
 /**
@@ -4520,9 +4675,33 @@ export declare function parseParameters(params?: Parameters, args?: string[]): P
  * @see functions {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
  *    for parsing {@link BenchmarkParameters}.
  *
- * @category Parameters
+ * @group Parameters
  */
 export declare function parseSomeParameters(params: Parameters, args?: string[]): string[];
+/**
+ * Compute path to the `optalcp` binary.
+ *
+ * @param params Parameters object that may contain the path to the solver.
+ *
+ * @remarks
+ *
+ * This function is used to compute the path to `optalcp` binary, for example,
+ * when {@link solve} is called.  Usually, there's no need to call this function
+ * directly.  However, it could be used to check the path in case of problems.
+ *
+ * The function works as follows:
+ *   * If the `OPTALCP_SOLVER` environment variable is set, then it is used as the path.
+ *   * If `params.solverPath` is set, its value is returned.
+ *   * If npm package `@scheduleopt/optalcp-bin` is installed then
+ *     it is searched for the `optalcp` executable.
+ *   * If npm package `optalcp-bin-preview` is installed then
+ *     the it is searched too.
+ *   * Finally, if nothing from the above works, the function assumes that
+ *     `optalcp` is in the `PATH` and returns returns just `optalcp`.
+ *
+ * @group Other
+*/
+export declare function calcSolverPath(params: Parameters): string;
 /** @internal (could be made public later) */
 export type IntervalVarValue = null | {
     start: number;
@@ -4544,7 +4723,7 @@ export type IntervalVarValue = null | {
  * @see {@link SolveResult}
  * @see {@link Solution}
  *
- * @category Solving
+ * @group Solving
  */
 export type ObjectiveValue = undefined | number | null | Array<number | null>;
 /** @internal */
@@ -4571,7 +4750,7 @@ type SerializedSolution = {
  * @see {@link Solver}
  * @see {@link Solver.on | Solver.on('solution', ...)}
  *
- * @category Solving
+ * @group Solving
  */
 export type SolutionEvent = {
     /** The duration of the solve at the time the solution was found, in seconds. */
@@ -4622,7 +4801,7 @@ export type SolutionEvent = {
  * @see {@link Solver}
  * @see {@link Solver.on | Solver.on("lowerBound", ...)}
  *
- * @category Solving
+ * @group Solving
  */
 export type LowerBoundEvent = {
     /** Duration of the solve at the time the lower bound was found, in seconds. */
@@ -4641,7 +4820,7 @@ export type LowerBoundEvent = {
  * Note that in the evaluation version of OptalCP, the values of variables in
  * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
  *
- * @category Solving
+ * @group Solving
  */
 export declare class Solution {
     #private;
@@ -4798,7 +4977,7 @@ type DomainsEvent = {
  * The propagation can also finish by a limit. In this case {@link PropagationResult.domains} is
  * set to "limit".
  *
- * @category Propagation
+ * @group Propagation
  */
 export type PropagationResult = {
     /** The duration of the propagation is in seconds. */
@@ -4833,7 +5012,7 @@ export type PropagationResult = {
  * For each variable, this class provides a way to query the computed domain,
  * e.g. using function {@link ModelDomains.getStartMin}.
  *
- * @category Propagation
+ * @group Propagation
  */
 export declare class ModelDomains {
     #private;
@@ -4983,6 +5162,14 @@ export declare class ModelDomains {
  * * {@link cumulGe}: greater than or equal to a constant.
  * * {@link cumulLe}: less than or equal to a constant.
  *
+ * #### Mapping/batching
+ *
+ * * {@link itvMapping}: map tasks (interval variables) to slots (other interval variables).
+ *
+ * #### Constraints on integer variables/expressions
+ *
+ * * {@link pack}: pack items of various sizes into a set of bins.
+ *
  * #### Objective
  *
  * * {@link minimize}: minimize an integer expression.
@@ -5067,7 +5254,7 @@ export declare class ModelDomains {
  * @see {@link Solution}
  * @see {@link Solver}
  *
- * @category Modeling
+ * @group Modeling
  */
 export declare class Model {
     #private;
@@ -5131,7 +5318,8 @@ export declare class Model {
     /**
     * Creates an expression that replaces value _absent_ by a constant.
     *
-    * @remarksThe resulting expression is:
+    * @remarks
+    * The resulting expression is:
     *
     * * equal to `arg` if `arg` is _present_
     * * and equal to `absentValue` otherwise (i.e. when `arg` is _absent_).
@@ -5254,7 +5442,8 @@ export declare class Model {
     /**
     * Creates Boolean expression `arg1` &ge; `arg2`.
     *
-    * @remarksIf one of the arguments has value _absent_, then the resulting expression also has value _absent_.
+    * @remarks
+    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
     *
     * Use function {@link Model.constraint} to create a constraint from this expression.
     *
@@ -5467,9 +5656,13 @@ export declare class Model {
     _floatOptionalLinearExpr(coefficients: number[], expressions: (FloatExpr | number)[], constantTerm: number): FloatExpr;
     /** @internal */
     _floatElement(array: number[], subscript: IntExpr | number): FloatExpr;
+    /** @internal */
     lexLe(lhs: (IntExpr | number)[], rhs: (IntExpr | number)[]): void;
+    /** @internal */
     lexLt(lhs: (IntExpr | number)[], rhs: (IntExpr | number)[]): void;
+    /** @internal */
     lexGe(lhs: (IntExpr | number)[], rhs: (IntExpr | number)[]): void;
+    /** @internal */
     lexGt(lhs: (IntExpr | number)[], rhs: (IntExpr | number)[]): void;
     /**
     * Creates an integer expression for the start of an interval variable.
@@ -5807,6 +6000,77 @@ export declare class Model {
     *
     *  */
     alternative(main: IntervalVar, options: IntervalVar[]): void;
+    /** @internal */
+    intervalVarElement(slots: IntervalVar[], index: IntExpr | number, value: IntervalVar): void;
+    /** @internal */
+    increasingIntervalVarElement(slots: IntervalVar[], index: IntExpr | number, value: IntervalVar): void;
+    /**
+    *
+    * Map `tasks` on `slots` according to the `indices` array.
+    *
+    * @param tasks Array of interval variables to map.
+    * @param slots Array of interval variables to map to.
+    * @param indices Array of integer expressions that specify the mapping (of the same length as `tasks`).
+    *
+    * @remarks
+    *
+    * Each task is synchronized with the slot it is assigned to. Multiple tasks can be
+    * assigned to the same slot. A slot without any task is _absent_. Absent tasks are
+    * not assigned to any slot (their index value is _absent_).  Slots are sorted by
+    * both start and end. Absent slots are at the end of the array.
+    *
+    * The constraint can be used to form batches of synchronized tasks (so-called
+    * _p-batching_). In this case `slots` corresponds to batches. The size of the
+    * batches can be limited using, e.g., {@link Model.pack} constraint.
+    *
+    * #### Formal definition
+    *
+    * Let $T$ be the number of tasks (the length of the
+    * array `tasks`). The number of the indices must also be $T$ (arrays `tasks` and
+    * `indices` must have the same length).  Let `tasks[t]` be one of the tasks, i.e.,
+    * $\mathtt{t} \in \{0,1,\dots T-1\}$. Then `indices[t]` is the index of the slot
+    * the task `tasks[t]` is assigned to.  Only present tasks are assigned:
+    * $$
+    * \mathtt{
+    *   \forall t \in \mathrm{0,\dots,T-1:} \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
+    * }
+    * $$
+    * Each task is synchronized with the slot to which it is assigned:
+    * $$
+    * \begin{aligned}
+    * \mathtt{\forall t \in \mathrm{0,\dots,T-1} \text{ such that } tasks[t] \ne \text{absent:}} \\
+    *     \mathtt{slots[indices[t]]} &\ne \textrm{absent} \\
+    *     \mathtt{startOf(tasks[t])} &= \mathtt{startOf(slots[indices[t]]) }\\
+    *     \mathtt{endOf(tasks[t])} &= \mathtt{endOf(slots[indices[t]])}
+    * \end{aligned}
+    * $$
+    * A slot is present if and only if there is a task assigned to it:
+    * $$
+    * \forall \mathtt{s} \in 0,\dots,S-1:\;
+    * \mathtt{presenceOf(tasks[s])} \;\Leftrightarrow\; (\exists \mathtt{t} \in 0,\dots,T-1: \mathtt{indices[t]=s})
+    * $$
+    * Absent slots are positioned at the end of the array:
+    * $$
+    * \mathtt{
+    *    \forall s \in \mathrm{1,\dots,S-1}:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
+    * }
+    * $$
+    * Present slots are sorted by both start and end:
+    * $$
+    * \begin{aligned}
+    * \mathtt{\forall s \in \mathrm{1,\dots,S-1} \text{ such that } slots[s] \ne \text{absent:}} \\
+    *     \mathtt{startOf(slots[s-1])} &\le \mathtt{startOf(slots[s]) }
+    *     \\
+    *     \mathtt{endOf(slots[s-1])} &\le \mathtt{endOf(slots[s])}
+    * \end{aligned}
+    * $$
+    *
+    * The amount of the propagation for this constraint can be controlled by parameter
+    * {@link Parameters.packPropagationLevel}.
+    *
+    * @see {@link Model.pack} for limiting the amount of tasks assigned to a slot.
+    *  */
+    itvMapping(tasks: IntervalVar[], slots: IntervalVar[], indices: (IntExpr | number)[]): void;
     /**
     * Constraints an interval variable to span (cover) a set of other interval variables.
     *
@@ -6300,7 +6564,7 @@ export declare class Model {
     * This function is equivalent to:
     *
     * ```
-    *   model.constraint(model.ne(model.intStepFunctionEval(func, interval.start()), 0));
+    *   model.constraint(model.ne(model.stepFunctionEval(func, interval.start()), 0));
     * ```
     *
     * I.e., the function value at the start of the interval variable cannot be zero.
@@ -6339,6 +6603,8 @@ export declare class Model {
     /** @internal */
     _startBeforeStartChain(intervals: IntervalVar[]): void;
     /** @internal */
+    _endBeforeEndChain(intervals: IntervalVar[]): void;
+    /** @internal */
     _decisionPresentIntVar(variable: IntExpr | number, isLeft: boolean): SearchDecision;
     /** @internal */
     _decisionAbsentIntVar(variable: IntExpr | number, isLeft: boolean): SearchDecision;
@@ -6374,6 +6640,8 @@ export declare class Model {
     _noGood(decisions: SearchDecision[]): void;
     /** @internal */
     _related(x: IntervalVar, y: IntervalVar): void;
+    /** @internal */
+    pack(load: (IntExpr | number)[], where: (IntExpr | number)[], sizes: number[]): void;
     /**
      * Constrain a set of interval variables not to overlap.
      *
@@ -6565,13 +6833,11 @@ export declare class Model {
     /** @internal */
     floatConst(value: number): FloatExpr;
     /** @internal */
-    boolVar({ range, optional, name }: {
+    boolVar(params?: {
         range?: [boolean?, boolean?] | boolean;
         optional?: boolean;
         name?: string;
     }): BoolVar;
-    /** @internal */
-    boolVar(name?: string): BoolVar;
     /** @internal */
     auxiliaryBoolVar({ range, optional, name }: {
         range?: [boolean?, boolean?] | boolean;
@@ -6614,27 +6880,23 @@ export declare class Model {
      * let z = model.intVar({ range: 10, optional: true, name: "z" });
      * ```
      */
-    intVar(params: {
+    intVar(params?: {
         range?: [number?, number?] | number;
         optional?: boolean;
         name?: string;
     }): IntVar;
     /** @internal */
-    auxiliaryIntVar({ range, optional, name }: {
+    auxiliaryIntVar(params: {
         range?: [number?, number?] | number;
         optional?: boolean;
         name?: string;
     }): IntVar;
     /** @internal */
-    auxiliaryIntVar(name?: string): IntVar;
-    /** @internal */
-    floatVar({ range, optional, name }: {
+    floatVar(params?: {
         range?: [number?, number?] | number;
         optional?: boolean;
         name?: string;
     }): FloatVar;
-    /** @internal */
-    floatVar(name?: string): FloatVar;
     /** @internal */
     auxiliaryFloatVar({ range, optional, name }: {
         range?: [number?, number?] | number;
@@ -6686,7 +6948,7 @@ export declare class Model {
      *
      * @see {@link IntervalVar}
      */
-    intervalVar(params: {
+    intervalVar(params?: {
         start?: number | [number?, number?];
         end?: number | [number?, number?];
         length?: number | [number?, number?];
@@ -6921,6 +7183,8 @@ export declare class Model {
  */
 export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
 /**
+ * @noInheritDoc
+ *
  * The solver provides asynchronous communication with the solver.
  *
  * Unlike function {@link solve}, `Solver` allows the user to process individual events
@@ -6996,8 +7260,7 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  * }
  * ```
  *
- * @category Solving
- * @noInheritDoc
+ * @group Solving
  */
 export declare class Solver extends EventEmitter {
     #private;
@@ -7416,7 +7679,7 @@ export declare class Solver extends EventEmitter {
  * An item in {@link SolveResult.objectiveHistory | SolveResult.objectiveHistory} array.
  * There is one item for each solution found.
  *
- * @category Solving
+ * @group Solving
  */
 export type ObjectiveHistoryItem = {
     /** Duration of the solve at the time the solution was found, in seconds. */
@@ -7452,7 +7715,7 @@ export type ObjectiveHistoryItem = {
  * search. In addition, it contains the best solution found, the history of the
  * objective values, etc.
  *
- * @category Solving
+ * @group Solving
  */
 export type SolveResult = SolveSummary & {
     /** The history of objective values. Each item of the array contains an
@@ -7501,7 +7764,7 @@ export type SolveResult = SolveSummary & {
  *
  * For an example of using this function, see {@link Model}.
  *
- * @category Solving
+ * @group Solving
  */
 export declare function solve(model: Model, params?: Parameters, warmStart?: Solution, log?: NodeJS.WritableStream | null): Promise<SolveResult>;
 /**
@@ -7513,7 +7776,7 @@ export declare function solve(model: Model, params?: Parameters, warmStart?: Sol
  * it contains the model itself, the parameters to use for solving (optional)
  * and the starting solution (optional).
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export type ProblemDefinition = {
     /** The model to solve. */
@@ -7535,7 +7798,7 @@ export type ProblemDefinition = {
  * for example.  The problem can be converted back from JSON format into an instance
  * of {@link ProblemDefinition} using function {@link json2problem}.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export declare function problem2json(problem: ProblemDefinition): string;
 /**
@@ -7550,7 +7813,7 @@ export declare function problem2json(problem: ProblemDefinition): string;
  * Variables in the new model can be accessed using function {@link
  * Model.getIntervalVars | Model.getIntervalVars}.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export declare function json2problem(json: string): ProblemDefinition;
 /** @internal */
@@ -7592,7 +7855,7 @@ export declare function _toText(model: Model, cmd: SolverCommand, params?: Param
  *
  * In case of an error, this function returns a rejected promise.
  *
- * @category Model exporting
+ * @group Model exporting
  */
 export declare function problem2txt(model: Model, params?: Parameters, warmStart?: Solution, log?: NodeJS.WritableStream | null): Promise<string | undefined>;
 /**
@@ -7615,7 +7878,7 @@ export declare function problem2txt(model: Model, params?: Parameters, warmStart
  *
  * In case of an error, this function returns a rejected promise.
  *
- * @category Model exporting
+ * @group Model exporting
  * @experimental
  */
 export declare function problem2js(model: Model, params?: Parameters, warmStart?: Solution, log?: NodeJS.WritableStream | null): Promise<string | undefined>;
@@ -7760,7 +8023,7 @@ export declare function problem2js(model: Model, params?: Parameters, warmStart?
  *
  * As we can see, this model propagates more than the previous one.
  *
- * @category Propagation
+ * @group Propagation
  */
 export declare function propagate(model: Model, parameters?: Parameters, log?: NodeJS.WritableStream | null): Promise<PropagationResult>;
 /**
@@ -7786,7 +8049,7 @@ export declare function propagate(model: Model, parameters?: Parameters, log?: N
  *              `nbSeeds` parameter.
  * * `{flat_name}` - the name of the model with all characters `'/'` replaced by `'_'`.
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type BenchmarkParameters = Parameters & {
     /** Run each model multiple times with a different random seed. */
@@ -7870,7 +8133,7 @@ export declare const BenchmarkParametersHelp: string;
 /**
  * Parse benchmark parameters from command line arguments.
  *
- * @category Benchmarking
+ * @group Benchmarking
  *
  * @param params Input/output argument. Contains default values of parameters
  *               that will be overridden by command line arguments.
@@ -7930,12 +8193,15 @@ export declare const BenchmarkParametersHelp: string;
  * ...
  * ```
  *
- * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix,
- * and also for worker ranges using `--workerN-M.` prefix.
+ * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
+ *
+ *  * `--workerN.` or `--workersN.` for worker `N`
+ *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ *
  * For example:
  *
  * * `--worker0.searchType FDS` sets the search type to the first worker only.
- * * `--worker4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
+ * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  *
  * @see {@link parseSomeBenchmarkParameters} for a version that allows unrecognized arguments.
  * @see Functions {@link parseParameters} and {@link parseSomeParameters} for
@@ -7958,7 +8224,7 @@ export declare function parseBenchmarkParameters(params?: BenchmarkParameters, a
  * @see {@link parseBenchmarkParameters} for more details.
  * @see {@link parseParameters}, {@link parseSomeParameters} for parsing only solver parameters.
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export declare function parseSomeBenchmarkParameters(params: BenchmarkParameters, args?: string[]): Array<string>;
 /**
@@ -7969,7 +8235,7 @@ export declare function parseSomeBenchmarkParameters(params: BenchmarkParameters
  * @see {@link BenchmarkResult}
  * @see {@link benchmark}
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type BaseBenchmarkResult = {
     /** Name of the model that was run.  See {@link Model.setName}. */
@@ -7992,7 +8258,7 @@ export type BaseBenchmarkResult = {
  * @see {@link BenchmarkResult}
  * @see {@link benchmark}
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type ErrorBenchmarkResult = BaseBenchmarkResult & {
     /** Error that happened during the solve. */
@@ -8009,7 +8275,7 @@ export type ErrorBenchmarkResult = BaseBenchmarkResult & {
  * @see {@link BenchmarkResult}
  * @see {@link benchmark}
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type NormalBenchmarkResult = BaseBenchmarkResult & SolveResult & {
     /** For regular runs, `error` is undefined. This property
@@ -8033,13 +8299,13 @@ export type NormalBenchmarkResult = BaseBenchmarkResult & SolveResult & {
  * @see {@link NormalBenchmarkResult}
  * @see {@link ErrorBenchmarkResult}
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type BenchmarkResult = ErrorBenchmarkResult | NormalBenchmarkResult;
 /**
  *  A function that generates a problem definition or a model from the given input. The function can be `async`.
  *
- * @category Benchmarking
+ * @group Benchmarking
  */
 export type ProblemGenerator = (input: any) => ProblemDefinition | Model | Promise<ProblemDefinition> | Promise<Model>;
 /**
@@ -8147,7 +8413,7 @@ export type ProblemGenerator = (input: any) => ProblemDefinition | Model | Promi
  * runs will be stored in the directory `logs` (one file for each run named
  * after the model, see {@link Model.setName | Model.setName}.
  *
- * @category Benchmarking
+ * @group Benchmarking
  *
  */
 export declare function benchmark(problemGenerator: ProblemGenerator, inputs: Array<any>, params: BenchmarkParameters): Promise<BenchmarkResult[]>;
