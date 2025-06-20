@@ -23,7 +23,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export const Version = "2025.6.0";
+export const Version = "2025.6.1";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -2756,6 +2756,29 @@ function paramsFromJSON(params) {
             parseInfinities(params);
     return params;
 }
+// Try to find solver executable in the given package.
+// relPath is the relative path within the package from its "bin" directory.
+function getSolverPathFromPackage(packageName, relPath) {
+    try {
+        let binPath = import.meta.resolve(packageName + "/bin/");
+        // On Unix the URI looks like this:
+        //   file:///home/.../node_modules/@scheduleopt/optalcp-bin/bin/
+        // Then we have to strip the "file://" prefix, but not the third slash.
+        if (binPath.startsWith("file://"))
+            binPath = binPath.slice(7);
+        // On windows the URI may look like this:
+        //   file:///C:/Users/.../node_modules/@scheduleopt/optalcp-bin/bin/
+        // So we have to strip THREE slashes in this case:
+        if (process.platform == "win32" && binPath.startsWith("/"))
+            binPath = binPath.slice(1);
+        let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
+        if (fs.existsSync(result))
+            return result;
+        console.warn(`Found ${binPath} but the binary ${relPath} is not present there.`);
+    }
+    catch (e) { }
+    return undefined;
+}
 /**
  * Compute path to the `optalcp` binary.
  *
@@ -2788,37 +2811,17 @@ export function calcSolverPath(params) {
     // Path to the executable in the optalcp-bin and optalcp-bin-preview packages:
     let relPath = process.platform + "-" + process.arch + "/" + binaryName;
     // First try to locate the full version:
-    try {
-        let binPath = import.meta.resolve("@scheduleopt/optalcp-bin/bin/");
-        // On Unix the URI looks like this:
-        //   file:///home/.../node_modules/@scheduleopt/optalcp-bin/bin/
-        // Then we have to strip the "file://" prefix, but not the third slash.
-        if (binPath.startsWith("file://"))
-            binPath = binPath.slice(7);
-        // On windows the URI may look like this:
-        //   file:///C:/Users/.../node_modules/@scheduleopt/optalcp-bin/bin/
-        // So we have to strip THREE slashes in this case:
-        if (process.platform == "win32" && binPath.startsWith("/"))
-            binPath = binPath.slice(1);
-        let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
-        if (fs.existsSync(result))
-            return result;
-        console.warn(`Found ${binPath} but the binary ${relPath} is not present there.`);
-    }
-    catch (e) { }
-    // Then try to locate the evaluation version:
-    try {
-        let binPath = import.meta.resolve("@scheduleopt/optalcp-bin-preview/bin/");
-        if (binPath.startsWith("file://"))
-            binPath = binPath.slice(7);
-        if (process.platform == "win32" && binPath.startsWith("/"))
-            binPath = binPath.slice(1);
-        let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
-        if (fs.existsSync(result))
-            return result;
-        console.warn(`Found ${binPath} but the binary ${relPath} is not present there.`);
-    }
-    catch (e) { }
+    let result = getSolverPathFromPackage("@scheduleopt/optalcp-bin", relPath);
+    if (result !== undefined)
+        return result;
+    // Then try to locate the academic version:
+    result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-academic", relPath);
+    if (result !== undefined)
+        return result;
+    // Then try to locate the preview version:
+    result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-preview", relPath);
+    if (result !== undefined)
+        return result;
     // Finally assume that optalcp is in the PATH
     return "optalcp";
 }
@@ -3502,13 +3505,6 @@ let ParameterCatalog = {
             throw Error("Parameter LNSTier3Effort: value " + value + " is not in required range 0.000000..1.000000.");
         workerParams._lnsTier3Effort = value;
     },
-    // LNSProbabilityAcceptSameObjective
-    /** @internal */
-    _setLNSProbabilityAcceptSameObjective: function (workerParams, value) {
-        if (value < 0.000000 || value > 1.000000)
-            throw Error("Parameter LNSProbabilityAcceptSameObjective: value " + value + " is not in required range 0.000000..1.000000.");
-        workerParams._lnsProbabilityAcceptSameObjective = value;
-    },
     // LNSStepFailLimitFactor
     /** @internal */
     _setLNSStepFailLimitFactor: function (workerParams, value) {
@@ -3686,6 +3682,11 @@ let ParameterCatalog = {
     /** @internal */
     _setLNSLearningRun: function (workerParams, value) {
         workerParams._lnsLearningRun = value;
+    },
+    // LNSStayOnObjective
+    /** @internal */
+    _setLNSStayOnObjective: function (workerParams, value) {
+        workerParams._lnsStayOnObjective = value;
     },
     // SimpleLBWorker
     setSimpleLBWorker: function (workerParams, value) {
@@ -3874,6 +3875,11 @@ let ParameterCatalog = {
     /** @internal */
     _setLNSTrainingObjectiveLimit: function (workerParams, value) {
         workerParams._lnsTrainingObjectiveLimit = value;
+    },
+    // POSAbsentRelated
+    /** @internal */
+    _setPOSAbsentRelated: function (workerParams, value) {
+        workerParams._pOSAbsentRelated = value;
     },
     // DefaultCallbackBlockSize
     /** @internal */
@@ -4345,12 +4351,6 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSTier3Effort,
         setOnWorker: ParameterCatalog._setLNSTier3Effort,
     },
-    lnsprobabilityacceptsameobjective: {
-        name: 'LNSProbabilityAcceptSameObjective',
-        parse: ParseNumber,
-        setGlobally: ParameterCatalog._setLNSProbabilityAcceptSameObjective,
-        setOnWorker: ParameterCatalog._setLNSProbabilityAcceptSameObjective,
-    },
     lnsstepfaillimitfactor: {
         name: 'LNSStepFailLimitFactor',
         parse: ParseNumber,
@@ -4507,6 +4507,12 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSLearningRun,
         setOnWorker: ParameterCatalog._setLNSLearningRun,
     },
+    lnsstayonobjective: {
+        name: 'LNSStayOnObjective',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSStayOnObjective,
+        setOnWorker: ParameterCatalog._setLNSStayOnObjective,
+    },
     simplelbworker: {
         name: 'SimpleLBWorker',
         parse: ParseNumber,
@@ -4643,6 +4649,12 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setLNSTrainingObjectiveLimit,
         setOnWorker: ParameterCatalog._setLNSTrainingObjectiveLimit,
+    },
+    posabsentrelated: {
+        name: 'POSAbsentRelated',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setPOSAbsentRelated,
+        setOnWorker: ParameterCatalog._setPOSAbsentRelated,
     },
     defaultcallbackblocksize: {
         name: 'DefaultCallbackBlockSize',
@@ -4789,9 +4801,9 @@ class ParameterParser {
  * (including optional variables) and the value of the objective (if the model
  * specified one).
  *
- * ### Evaluation version of OptalCP
+ * ### Preview version of OptalCP
  *
- * Note that in the evaluation version of OptalCP, the values of variables in
+ * Note that in the preview version of OptalCP, the values of variables in
  * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
  *
  * @group Solving
@@ -4823,7 +4835,7 @@ export class Solution {
      * objective returns _undefined_. If the objective value is _absent_
      * (see optional {@link IntExpr}) then it returns _null_.
      *
-     * The correct value is reported even in the evaluation version of OptalCP.
+     * The correct value is reported even in the preview version of OptalCP.
      */
     getObjective() { return this.#objective; }
     /** @internal */
@@ -4848,7 +4860,7 @@ export class Solution {
      * Returns the start of the given interval variable in the solution.
      * If the variable is absent in the solution, it returns _null_.
      *
-     * In the evaluation version of OptalCP, this function always returns `null`
+     * In the preview version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getStart(variable) {
@@ -4861,7 +4873,7 @@ export class Solution {
      * Returns the end of the given interval variable in the solution.
      * If the variable is absent in the solution, it returns _null_.
      *
-     * In the evaluation version of OptalCP, this function always returns `null`
+     * In the preview version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getEnd(variable) {
@@ -5179,7 +5191,7 @@ export class ModelDomains {
  *     console.log("No solution found.");
  *   else {
  *     const solution = result.bestSolution!;
- *     // Note that in the evaluation version of the solver, the variable values in
+ *     // Note that in the preview version of the solver, the variable values in
  *     // the solution are masked, i.e. they are all _absent_ (`null` in JavaScript).
  *     // Objective value is not masked though.
  *     console.log("Solution found with makespan " + solution.getObjective());

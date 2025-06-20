@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export declare const Version = "2025.6.0";
+export declare const Version = "2025.6.1";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -2528,16 +2528,6 @@ export type WorkerParameters = {
     _lnsTier3Effort?: number;
     /**
     *  @internal
-    * Probability to accept a solution with the same objective value.
-    *
-    * blah blah
-    *
-    * The parameter takes a floating point value  in range `0.000000..1.000000`.
-    * The default value is `1`.
-    */
-    _lnsProbabilityAcceptSameObjective?: number;
-    /**
-    *  @internal
     * Multiplication factor to affect fail limit of every LNS step.
     *
     * blah blah
@@ -2792,6 +2782,15 @@ export type WorkerParameters = {
     */
     _lnsLearningRun?: boolean;
     /**
+    *  @internal
+    * Don't accept better solutions (for learning).
+    *
+    * blah blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsStayOnObjective?: boolean;
+    /**
     * Which worker computes simple lower bound.
     *
     * Simple lower bound is a bound such that infeasibility of a better objective can be proved by propagation only (without the search). The given worker computes simple lower bound before it starts the normal search. If a worker with the given number doesn't exist, then the lower bound is not computed.
@@ -3025,6 +3024,15 @@ export type WorkerParameters = {
     * The default value is `-Infinity`.
     */
     _lnsTrainingObjectiveLimit?: number;
+    /**
+    *  @internal
+    * Whether try to find related of absent intervals.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _pOSAbsentRelated?: boolean;
     /**
     *  @internal
     * Default size of CallbackBlock. Must be multiple of 8..
@@ -3980,16 +3988,6 @@ export type Parameters = {
     _lnsTier3Effort?: number;
     /**
     *  @internal
-    * Probability to accept a solution with the same objective value.
-    *
-    * blah blah
-    *
-    * The parameter takes a floating point value  in range `0.000000..1.000000`.
-    * The default value is `1`.
-    */
-    _lnsProbabilityAcceptSameObjective?: number;
-    /**
-    *  @internal
     * Multiplication factor to affect fail limit of every LNS step.
     *
     * blah blah
@@ -4244,6 +4242,15 @@ export type Parameters = {
     */
     _lnsLearningRun?: boolean;
     /**
+    *  @internal
+    * Don't accept better solutions (for learning).
+    *
+    * blah blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsStayOnObjective?: boolean;
+    /**
     * Which worker computes simple lower bound.
     *
     * Simple lower bound is a bound such that infeasibility of a better objective can be proved by propagation only (without the search). The given worker computes simple lower bound before it starts the normal search. If a worker with the given number doesn't exist, then the lower bound is not computed.
@@ -4487,6 +4494,15 @@ export type Parameters = {
     * The default value is `-Infinity`.
     */
     _lnsTrainingObjectiveLimit?: number;
+    /**
+    *  @internal
+    * Whether try to find related of absent intervals.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _pOSAbsentRelated?: boolean;
     /**
     *  @internal
     * Default size of CallbackBlock. Must be multiple of 8..
@@ -4784,7 +4800,7 @@ export type SolutionEvent = {
      * optional variables) and the value of the objective (if the model specified
      * one).
      *
-     * Note that in the evaluation version of OptalCP, the values of variables in
+     * Note that in the preview version of OptalCP, the values of variables in
      * the solution are masked and replaced by value _absent_ (`null` in
      * JavaScript).
      */
@@ -4815,9 +4831,9 @@ export type LowerBoundEvent = {
  * (including optional variables) and the value of the objective (if the model
  * specified one).
  *
- * ### Evaluation version of OptalCP
+ * ### Preview version of OptalCP
  *
- * Note that in the evaluation version of OptalCP, the values of variables in
+ * Note that in the preview version of OptalCP, the values of variables in
  * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
  *
  * @group Solving
@@ -4840,14 +4856,14 @@ export declare class Solution {
      * objective returns _undefined_. If the objective value is _absent_
      * (see optional {@link IntExpr}) then it returns _null_.
      *
-     * The correct value is reported even in the evaluation version of OptalCP.
+     * The correct value is reported even in the preview version of OptalCP.
      */
     getObjective(): ObjectiveValue;
     /**
      * Returns true if the given variable is present in the solution, i.e., if its
      * value is not _absent_.  See optional {@link IntervalVar}.
      *
-     * In the evaluation version of OptalCP, this function always returns `false`
+     * In the preview version of OptalCP, this function always returns `false`
      * because real values of variables are masked and replaced by value _absent_.
      */
     isPresent(variable: IntervalVar): boolean;
@@ -4857,7 +4873,7 @@ export declare class Solution {
      * Returns true if the given variable is absent in the solution, i.e., if its
      * value is _absent_.  See optional {@link IntervalVar}.
      *
-     * In the evaluation version of OptalCP, this function always returns `true`
+     * In the preview version of OptalCP, this function always returns `true`
      * because real values of variables are masked and replaced by value _absent_.
      */
     isAbsent(variable: IntervalVar): boolean;
@@ -4873,7 +4889,7 @@ export declare class Solution {
      * Returns the start of the given interval variable in the solution.
      * If the variable is absent in the solution, it returns _null_.
      *
-     * In the evaluation version of OptalCP, this function always returns `null`
+     * In the preview version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getStart(variable: IntervalVar): number | null;
@@ -4881,7 +4897,7 @@ export declare class Solution {
      * Returns the end of the given interval variable in the solution.
      * If the variable is absent in the solution, it returns _null_.
      *
-     * In the evaluation version of OptalCP, this function always returns `null`
+     * In the preview version of OptalCP, this function always returns `null`
      * because real values of variables are masked and replaced by value _absent_.
      */
     getEnd(variable: IntervalVar): number | null;
@@ -5230,7 +5246,7 @@ export declare class ModelDomains {
  *     console.log("No solution found.");
  *   else {
  *     const solution = result.bestSolution!;
- *     // Note that in the evaluation version of the solver, the variable values in
+ *     // Note that in the preview version of the solver, the variable values in
  *     // the solution are masked, i.e. they are all _absent_ (`null` in JavaScript).
  *     // Objective value is not masked though.
  *     console.log("Solution found with makespan " + solution.getObjective());
@@ -7434,7 +7450,7 @@ export declare class Solver extends EventEmitter {
      * let result = await solver.solve(myModel);
      * ```
      *
-     * Note that in the Evaluation version of the solver, the reported value of
+     * Note that in the Preview version of the solver, the reported value of
      * interval variable `x` will be always _absent_ because the real variable
      * values are masked.
      *
