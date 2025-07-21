@@ -23,7 +23,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export const Version = "2025.6.1";
+export const Version = "2025.7.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -2903,6 +2903,15 @@ let ParameterCatalog = {
             throw Error("Parameter NbWorkers: value " + value + " is not in required range 0..4294967295.");
         params.nbWorkers = value;
     },
+    // NbHelpers
+    /** @internal */
+    _setNbHelpers: function (params, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter NbHelpers: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter NbHelpers: value " + value + " is not in required range 0..4294967295.");
+        params._nbHelpers = value;
+    },
     // SearchType
     setSearchType: function (workerParams, value) {
         if (typeof value != 'string')
@@ -2963,12 +2972,12 @@ let ParameterCatalog = {
         params.verifyExternalSolutions = value;
     },
     // AllocationBlockSize
-    setAllocationBlockSize: function (workerParams, value) {
+    setAllocationBlockSize: function (params, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter AllocationBlockSize: value " + value + " is not an integer.");
         if (value < 4 || value > 1073741824)
             throw Error("Parameter AllocationBlockSize: value " + value + " is not in required range 4..1073741824.");
-        workerParams.allocationBlockSize = value;
+        params.allocationBlockSize = value;
     },
     // TimeLimit
     setTimeLimit: function (params, value) {
@@ -3913,6 +3922,11 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setNbWorkers,
     },
+    nbhelpers: {
+        name: 'NbHelpers',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setNbHelpers,
+    },
     searchtype: {
         name: 'SearchType',
         parse: ParseString,
@@ -3954,7 +3968,6 @@ let parserConfig = {
         name: 'AllocationBlockSize',
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setAllocationBlockSize,
-        setOnWorker: ParameterCatalog.setAllocationBlockSize,
     },
     timelimit: {
         name: 'TimeLimit',

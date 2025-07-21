@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export declare const Version = "2025.6.1";
+export declare const Version = "2025.7.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -1878,19 +1878,6 @@ export type WorkerParameters = {
     */
     randomSeed?: number;
     /**
-    * The minimal amount of memory in kB for a single allocation.
-    *
-    * The solver allocates memory in blocks. This parameter sets the minimal size of a block. Larger blocks mean a higher risk of wasting memory. However, larger blocks may also lead to better performance, particularly when the size matches the page size supported by the operating system.
-    *
-    * The value of this parameter must be a power of 2.
-    *
-    * The default value is 2048 means 2MB, which means that up to ~12MB can be wasted per worker in the worst case.
-    *
-    * The parameter takes an unsigned integer value  in range `4..1073741824`.
-    * The default value is `2048`.
-    */
-    allocationBlockSize?: number;
-    /**
     *  @internal
     * Fail limit for each worker.
     *
@@ -3184,6 +3171,18 @@ export type Parameters = {
     * The default value is `0`.
     */
     nbWorkers?: number;
+    /**
+    *  @internal
+    * Number of helper threads.
+    *
+    * This parameter sets the number of helper threads that are used to speed up the search. Helper threads are used to propagate global constraints for workers.
+    *
+    * When this parameter is 0 (the default), no helper threads are used.
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `0`.
+    */
+    _nbHelpers?: number;
     /**
     * Type of search to use.
     *
