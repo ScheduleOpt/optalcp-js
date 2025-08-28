@@ -23,7 +23,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export const Version = "2025.7.0";
+export const Version = "2025.8.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -892,15 +892,15 @@ export class Objective extends ModelNode {
  *
  * @example
  *
- * In the following example we create three interval variables `x`, `y` and `z`.
+ * In the following example we create three integer variables `x`, `y` and `z`.
  * Variables `x` and `y` are present, but variable `z` is optional.
  * Each variable has a different range of possible values.
  *
  * ```ts
  * let model = CP.Model;
- * let x = model.intervalVar({ name: "x", range: [1, 3] });
- * let y = model.intervalVar({ name: "y", range: [0, 100] });
- * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
+ * let x = model.intVar({ name: "x", range: [1, 3] });
+ * let y = model.intVar({ name: "y", range: [0, 100] });
+ * let z = model.intVar({ name: "z", range: [10, 20], optional: true });
  * ```
  *
  * @group Modeling
@@ -1843,7 +1843,7 @@ export class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
     *
     * @see {@link Model.forbidExtent} for the equivalent function on {@link Model}.
     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
@@ -3671,6 +3671,11 @@ let ParameterCatalog = {
             throw Error("Parameter LNSNeighborhoodInitialQ: value " + value + " is not in required range 0..1.");
         workerParams._lnsNeighborhoodInitialQ = value;
     },
+    // LNSUseWarmStartOnly
+    /** @internal */
+    _setLNSUseWarmStartOnly: function (workerParams, value) {
+        workerParams._lnsUseWarmStartOnly = value;
+    },
     // LNSDivingLimit
     /** @internal */
     _setLNSDivingLimit: function (workerParams, value) {
@@ -3870,6 +3875,44 @@ let ParameterCatalog = {
     /** @internal */
     _setSetTimesExtendsCoef: function (workerParams, value) {
         workerParams._setTimesExtendsCoef = value;
+    },
+    // SetTimesHeightStrategy
+    /** @internal */
+    _setSetTimesHeightStrategy: function (workerParams, value) {
+        if (typeof value != 'string')
+            throw Error('Parameter SetTimesHeightStrategy: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'frommax':
+                value = 'FromMax';
+                break;
+            case 'frommin':
+                value = 'FromMin';
+                break;
+            case 'random':
+                value = 'Random';
+                break;
+            default: throw Error('Parameter SetTimesHeightStrategy: value "' + value + '" is not valid.');
+        }
+        workerParams._setTimesHeightStrategy = value;
+    },
+    // SetTimesItvMappingStrategy
+    /** @internal */
+    _setSetTimesItvMappingStrategy: function (workerParams, value) {
+        if (typeof value != 'string')
+            throw Error('Parameter SetTimesItvMappingStrategy: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'frommax':
+                value = 'FromMax';
+                break;
+            case 'frommin':
+                value = 'FromMin';
+                break;
+            case 'random':
+                value = 'Random';
+                break;
+            default: throw Error('Parameter SetTimesItvMappingStrategy: value "' + value + '" is not valid.');
+        }
+        workerParams._setTimesItvMappingStrategy = value;
     },
     // DiscreteLowCapacityLimit
     /** @internal */
@@ -4502,6 +4545,12 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSNeighborhoodInitialQ,
         setOnWorker: ParameterCatalog._setLNSNeighborhoodInitialQ,
     },
+    lnsusewarmstartonly: {
+        name: 'LNSUseWarmStartOnly',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSUseWarmStartOnly,
+        setOnWorker: ParameterCatalog._setLNSUseWarmStartOnly,
+    },
     lnsdivinglimit: {
         name: 'LNSDivingLimit',
         parse: ParseNumber,
@@ -4650,6 +4699,18 @@ let parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setSetTimesExtendsCoef,
         setOnWorker: ParameterCatalog._setSetTimesExtendsCoef,
+    },
+    settimesheightstrategy: {
+        name: 'SetTimesHeightStrategy',
+        parse: ParseString,
+        setGlobally: ParameterCatalog._setSetTimesHeightStrategy,
+        setOnWorker: ParameterCatalog._setSetTimesHeightStrategy,
+    },
+    settimesitvmappingstrategy: {
+        name: 'SetTimesItvMappingStrategy',
+        parse: ParseString,
+        setGlobally: ParameterCatalog._setSetTimesItvMappingStrategy,
+        setOnWorker: ParameterCatalog._setSetTimesItvMappingStrategy,
     },
     discretelowcapacitylimit: {
         name: 'DiscreteLowCapacityLimit',
@@ -6966,7 +7027,7 @@ export class Model {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
     *
     * @see {@link IntervalVar.forbidExtent} for the equivalent function on {@link IntervalVar}.
     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
@@ -7655,7 +7716,7 @@ export class Model {
                 this.#primaryObjectiveExpr = this.boolConst(primaryObjectiveArg);
             else {
                 // The expression is going to be used multiple times. Create ref if there isn't any already:
-                if (!primaryObjectiveArg.ref) {
+                if (primaryObjectiveArg.ref === undefined) {
                     primaryObjectiveArg.ref = this._getNewRefId(primaryObjectiveArg.arg);
                     primaryObjectiveArg.arg = undefined;
                 }
@@ -7944,6 +8005,10 @@ export class Solver extends EventEmitter {
      * The difference is that `warmStart` is guaranteed to be used by the solver
      * before the solve starts.  On the other hand, `sendSolution` can be called
      * at any time during the solve.
+     *
+     * Parameter {@link Parameters.LNSUseWarmStartOnly} controls whether the
+     * solver should only use the warm start solution (and not search for other
+     * initial solutions).
      */
     async solve(model, params, warmStart, log) {
         if (this.#solver !== undefined)

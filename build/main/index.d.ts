@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export declare const Version = "2025.7.0";
+export declare const Version = "2025.8.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -691,15 +691,15 @@ export declare class Objective extends ModelNode {
  *
  * @example
  *
- * In the following example we create three interval variables `x`, `y` and `z`.
+ * In the following example we create three integer variables `x`, `y` and `z`.
  * Variables `x` and `y` are present, but variable `z` is optional.
  * Each variable has a different range of possible values.
  *
  * ```ts
  * let model = CP.Model;
- * let x = model.intervalVar({ name: "x", range: [1, 3] });
- * let y = model.intervalVar({ name: "y", range: [0, 100] });
- * let z = model.intervalVar({ name: "z", range: [10, 20], optional: true });
+ * let x = model.intVar({ name: "x", range: [1, 3] });
+ * let y = model.intVar({ name: "y", range: [0, 100] });
+ * let z = model.intVar({ name: "z", range: [10, 20], optional: true });
  * ```
  *
  * @group Modeling
@@ -1518,7 +1518,7 @@ export declare class IntervalVar extends ModelNode {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
     *
     * @see {@link Model.forbidExtent} for the equivalent function on {@link Model}.
     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
@@ -2741,6 +2741,15 @@ export type WorkerParameters = {
     _lnsNeighborhoodInitialQ?: number;
     /**
     *  @internal
+    * Use only the user-provided warm start as the initial solution in LNS.
+    *
+    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
+    *
+    * The default value is `false`.
+    */
+    _lnsUseWarmStartOnly?: boolean;
+    /**
+    *  @internal
     * How many dives before switching to normal LNS.
     *
     * blah blah
@@ -2993,6 +3002,24 @@ export type WorkerParameters = {
     _setTimesExtendsCoef?: number;
     /**
     *  @internal
+    * Strategy for selecting pulse and step heights in SetTimes.
+    *
+    *
+    *
+    * The default value is `FromMax`.
+    */
+    _setTimesHeightStrategy?: "FromMax" | "FromMin" | "Random";
+    /**
+    *  @internal
+    * Strategy for selecting itvMapping assignment in SetTimes.
+    *
+    *
+    *
+    * The default value is `FromMin`.
+    */
+    _setTimesItvMappingStrategy?: "FromMax" | "FromMin" | "Random";
+    /**
+    *  @internal
     * Maximum capacity to use low-capacity timetable algorithm.
     *
     *
@@ -3036,7 +3063,7 @@ export type WorkerParameters = {
     *
     *
     *
-    * The default value is `true`.
+    * The default value is `false`.
     */
     _useReservoirPegging?: boolean;
 };
@@ -4213,6 +4240,15 @@ export type Parameters = {
     _lnsNeighborhoodInitialQ?: number;
     /**
     *  @internal
+    * Use only the user-provided warm start as the initial solution in LNS.
+    *
+    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
+    *
+    * The default value is `false`.
+    */
+    _lnsUseWarmStartOnly?: boolean;
+    /**
+    *  @internal
     * How many dives before switching to normal LNS.
     *
     * blah blah
@@ -4475,6 +4511,24 @@ export type Parameters = {
     _setTimesExtendsCoef?: number;
     /**
     *  @internal
+    * Strategy for selecting pulse and step heights in SetTimes.
+    *
+    *
+    *
+    * The default value is `FromMax`.
+    */
+    _setTimesHeightStrategy?: "FromMax" | "FromMin" | "Random";
+    /**
+    *  @internal
+    * Strategy for selecting itvMapping assignment in SetTimes.
+    *
+    *
+    *
+    * The default value is `FromMin`.
+    */
+    _setTimesItvMappingStrategy?: "FromMax" | "FromMin" | "Random";
+    /**
+    *  @internal
     * Maximum capacity to use low-capacity timetable algorithm.
     *
     *
@@ -4518,7 +4572,7 @@ export type Parameters = {
     *
     *
     *
-    * The default value is `true`.
+    * The default value is `false`.
     */
     _useReservoirPegging?: boolean;
 };
@@ -4866,8 +4920,13 @@ export declare class Solution {
      * because real values of variables are masked and replaced by value _absent_.
      */
     isPresent(variable: IntervalVar): boolean;
+    /**
+     * Returns true if the given variable is present in the solution, i.e., if its
+     * value is not _absent_.  See optional {@link IntExpr}
+     */
+    isPresent(variable: IntVar): boolean;
     /** @internal */
-    isPresent(variable: BoolVar | IntVar | FloatVar): boolean;
+    isPresent(variable: BoolVar | FloatVar): boolean;
     /**
      * Returns true if the given variable is absent in the solution, i.e., if its
      * value is _absent_.  See optional {@link IntervalVar}.
@@ -4876,12 +4935,23 @@ export declare class Solution {
      * because real values of variables are masked and replaced by value _absent_.
      */
     isAbsent(variable: IntervalVar): boolean;
-    /** @internal */
-    isAbsent(variable: BoolVar | IntVar | FloatVar): boolean;
+    /**
+     * Returns true if the given variable is absent in the solution, i.e., if its
+     * value is _absent_.  See optional {@link IntExpr}.
+     */
+    isAbsent(variable: BoolVar | FloatVar): boolean;
+    /**
+     * Returns the value of the given variable in the solution.
+     * If the variable is absent in the solution, it returns _null_.
+     *
+     * In the preview version of OptalCP, this function always returns `null`
+     * because real values of variables are masked and replaced by value _absent_.
+     */
+    getValue(variable: IntVar): number | null;
     /** @internal */
     getValue(variable: BoolVar): boolean | null;
     /** @internal */
-    getValue(variable: IntVar | FloatVar): number | null;
+    getValue(variable: FloatVar): number | null;
     /** @internal */
     getValue(variable: IntervalVar): IntervalVarValue;
     /**
@@ -4911,7 +4981,9 @@ export declare class Solution {
     setObjective(value: ObjectiveValue): void;
     /** @internal */
     setAbsent(boolVar: BoolVar): void;
-    /** @internal */
+    /**
+     * Sets the given variable to be absent in the solution.
+     */
     setAbsent(intVar: IntVar): void;
     /**
      * Sets the given variable to be absent in the solution.
@@ -4924,18 +4996,16 @@ export declare class Solution {
     setAbsent(intervalVar: IntervalVar): void;
     /** @internal */
     setValue(boolVar: BoolVar, value: boolean): void;
-    /** @internal */
+    /**
+     * Sets the value of the given integer variable in the solution.
+     * I.e., the integer variable will be present in the solution and have the give value.
+     */
     setValue(intVar: IntVar, value: number): void;
     /** @internal */
     setValue(floatVar: FloatVar, value: number): void;
     /**
      * Sets the start and end of the given interval variable in the solution. I.e., the
      * interval variable will be present in the solution.
-     *
-     * This function
-     * can be used for construction of an external solution that can be passed to
-     * the solver (see {@link solve}, {@link Solver} and {@link
-     * Solver.sendSolution}).
      */
     setValue(intervalVar: IntervalVar, start: number, end: number): void;
     /** @internal */
@@ -6564,7 +6634,7 @@ export declare class Model {
     *
     * @remarks
     *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$.
+    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
     *
     * @see {@link IntervalVar.forbidExtent} for the equivalent function on {@link IntervalVar}.
     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
@@ -7575,6 +7645,10 @@ export declare class Solver extends EventEmitter {
      * The difference is that `warmStart` is guaranteed to be used by the solver
      * before the solve starts.  On the other hand, `sendSolution` can be called
      * at any time during the solve.
+     *
+     * Parameter {@link Parameters.LNSUseWarmStartOnly} controls whether the
+     * solver should only use the warm start solution (and not search for other
+     * initial solutions).
      */
     solve(model: Model, params?: Parameters, warmStart?: Solution, log?: NodeJS.WritableStream | null): Promise<SolveResult>;
     /** @internal */
