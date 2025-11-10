@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export declare const Version = "2025.8.0";
+export declare const Version = "2025.11.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -189,7 +189,7 @@ export declare abstract class ModelNode {
 /**
  * @internal
  */
-declare class Blank extends ModelNode {
+declare class Directive extends ModelNode {
     #private;
     /** @internal */
     constructor(cp: Model, func: string, args: Array<Argument>);
@@ -1167,7 +1167,7 @@ export declare class IntervalVar extends ModelNode {
      * {@link setLength} or {@link setLengthMax}.
      * This function does not change the minimum length.
      *
-     * Note that the length of the interval cannot exceed than {@link LengthMax}.
+     * Note that the length of the interval must not exceed {@link LengthMax}.
      *
      * @see {@link setLength}, {@link setLengthMin}
      * @see {@link getLengthMin}, {@link getLengthMax}
@@ -1564,7 +1564,7 @@ export declare class IntervalVar extends ModelNode {
     /** @internal */
     _disjunctiveIsBefore(y: IntervalVar): BoolExpr;
     /** @internal */
-    _related(y: IntervalVar): void;
+    _related(y: IntervalVar): Directive;
 }
 /**
  * Models a sequence (order) of interval variables.
@@ -2176,14 +2176,34 @@ export type WorkerParameters = {
     */
     fdsPresenceStatusChoices?: boolean;
     /**
-    * Maximum step when generating initial choices for integer variables..
+    * Maximum number of initial choices on length of an interval variable.
     *
-    * For a variable with big initial domains, choices are generated only around min value considering the given step.
+    * When non-zero, this parameter limits the number of initial choices generated on length of an interval variable.
+    * When zero (the default), no choices on length are generated.
+    *
+    * The parameter takes an unsigned integer value  in range `0..2147483647`.
+    * The default value is `0`.
+    */
+    fdsMaxInitialLengthChoices?: number;
+    /**
+    * Maximum step when generating initial choices for length of an interval variable.
+    *
+    * Steps between choices for length of an interval variable are never bigger than the specified value.
+    *
     *
     * The parameter takes an unsigned integer value  in range `1..1073741823`.
-    * The default value is `107374182`.
+    * The default value is `1073741823`.
     */
-    fdsMaxInitialIntVarChoiceStep?: number;
+    fdsMinLengthChoiceStep?: number;
+    /**
+    * Minimum step when generating choices for integer variables..
+    *
+    * Steps between choices for integer variables are never smaller than the specified value.
+    *
+    * The parameter takes an unsigned integer value  in range `1..1073741823`.
+    * The default value is `1073741823`.
+    */
+    fdsMinIntVarChoiceStep?: number;
     /**
     * Influence of event time to initial choice rating.
     *
@@ -2374,6 +2394,31 @@ export type WorkerParameters = {
     */
     _fdsImproveNogoods?: boolean;
     /**
+    * Controls which side of a choice is is explored first (considering the rating)..
+    *
+    * This option can take the following values:
+    *
+    * * `FailureFirst`: Explore the failure side first.
+    * * `FailureLast`: Explore the failure side last.
+    * * `Random`: Explore either side randomly.
+    *
+    * The default value is `FailureFirst`.
+    */
+    fdsBranchOrdering?: "FailureFirst" | "FailureLast" | "Random";
+    /**
+    *  @internal
+    * Use SetTimes when out of choices.
+    *
+    * When FDS runs out of choices (all choices are decided) then:
+    *   * the value is true: FDS does a SetTimes dive to find a solution
+    *   * the value is false: FDS binds all variables to their lower bounds and checks whether it is a solution
+    * In both cases, if a solution is not found, then FDS splits the domains further.
+    *
+    *
+    * The default value is `true`.
+    */
+    _fdsDiveBySetTimes?: boolean;
+    /**
     * A strategy to choose objective cuts during FDSLB search..
     *
     * Possible values are:
@@ -2443,16 +2488,6 @@ export type WorkerParameters = {
     * The default value is `true`.
     */
     _lnsAggressiveDominance?: boolean;
-    /**
-    *  @internal
-    * Probability to choose differently than by the heuristic.
-    *
-    * blah blah
-    *
-    * The parameter takes a floating point value  in range `0.000000..1.000000`.
-    * The default value is `0`.
-    */
-    _lnsViolateHeuristicsProbability?: number;
     /**
     *  @internal
     * How many times iterate on the current solution (unless new one is found).
@@ -2552,6 +2587,45 @@ export type WorkerParameters = {
     * The default value is `true`.
     */
     _lnsResourceOptimization?: boolean;
+    /**
+    *  @internal
+    * Whether to restore absent interval variables in LNS steps.
+    *
+    * When this parameter is on (the default), then intervals that are absent in the current solution
+    * remain absent in the current step, unless relaxed. If the parameter is off, then absent intervals
+    * are optional during all LNS steps.
+    *
+    * The default value is `true`.
+    */
+    _lnsRestoreAbsentIntervals?: boolean;
+    /**
+    *  @internal
+    * Whether to restore lengths of interval variables in LNS steps.
+    *
+    * When this parameter is on, then interval lengths are restored to their values in the current solution,
+    * unless the interval is relaxed. If the parameter is off (the default), then interval lengths are not restored.
+    *
+    * The default value is `false`.
+    */
+    _lnsRestoreIntervalLengths?: boolean;
+    /**
+    *  @internal
+    * Always restore values of non-relaxed integer variables.
+    *
+    * When this parameter is set, values of not-relaxed integer variables are restored in every LNS step.
+    * If the parameter is not set, only the presence status of those intVars is restored.
+    *
+    * The default value is `true`.
+    */
+    _lnsRestoreIntVarValues?: boolean;
+    /**
+    * Use only the user-provided warm start as the initial solution in LNS.
+    *
+    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
+    *
+    * The default value is `false`.
+    */
+    lnsUseWarmStartOnly?: boolean;
     /**
     *  @internal
     * Probability to chose heuristics randomly.
@@ -2741,15 +2815,6 @@ export type WorkerParameters = {
     _lnsNeighborhoodInitialQ?: number;
     /**
     *  @internal
-    * Use only the user-provided warm start as the initial solution in LNS.
-    *
-    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
-    *
-    * The default value is `false`.
-    */
-    _lnsUseWarmStartOnly?: boolean;
-    /**
-    *  @internal
     * How many dives before switching to normal LNS.
     *
     * blah blah
@@ -2786,6 +2851,44 @@ export type WorkerParameters = {
     * The default value is `false`.
     */
     _lnsStayOnObjective?: boolean;
+    /**
+    *  @internal
+    * Use FDS inside LNS.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsFDS?: boolean;
+    /**
+    *  @internal
+    * Freeze interval variables before the relaxed fragment.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsFreezeIntervalsBeforeFragment?: boolean;
+    /**
+    *  @internal
+    * How m  uch to relax bounds of relaxed interval variables.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0.000000..1.000000`.
+    * The default value is `1`.
+    */
+    _lnsRelaxSlack?: number;
+    /**
+    *  @internal
+    * Size of the relaxed fragment is multiplied by this factor.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0.010000..10.000000`.
+    * The default value is `1`.
+    */
+    _lnsPortionMultiplier?: number;
     /**
     * Which worker computes simple lower bound.
     *
@@ -3020,6 +3123,46 @@ export type WorkerParameters = {
     _setTimesItvMappingStrategy?: "FromMax" | "FromMin" | "Random";
     /**
     *  @internal
+    * Initial density for SetTimes (nb of intervals / time unit).
+    *
+    *
+    *
+    * The parameter takes a floating point value  in range `0.000000..Infinity`.
+    * The default value is `0`.
+    */
+    _setTimesInitDensity?: number;
+    /**
+    *  @internal
+    * For how many iterations to use arithmetic average for density computation.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `20`.
+    */
+    _setTimesDensityLength?: number;
+    /**
+    *  @internal
+    * After how many iterations density is considered reliable.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `10`.
+    */
+    _setTimesDensityReliabilityThreshold?: number;
+    /**
+    *  @internal
+    * Multiply nbRemainingExtends by this factor.
+    *
+    *
+    *
+    * The parameter takes a floating point value  in range `0.000000..Infinity`.
+    * The default value is `0.5`.
+    */
+    _setTimesNbExtendsFactor?: number;
+    /**
+    *  @internal
     * Maximum capacity to use low-capacity timetable algorithm.
     *
     *
@@ -3066,6 +3209,35 @@ export type WorkerParameters = {
     * The default value is `false`.
     */
     _useReservoirPegging?: boolean;
+    /**
+    *  @internal
+    * Whether to use TimeNet.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _useTimeNet?: boolean;
+    /**
+    *  @internal
+    * Number of variables to process after objective cut before processing TimeNet.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `3`.
+    */
+    _timeNetVarsToPreprocess?: number;
+    /**
+    *  @internal
+    * Number of last bits in priority for At precedences.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `4..20`.
+    * The default value is `10`.
+    */
+    _timeNetSubPriorityBits?: number;
 };
 /**
  * Parameters specify how the solver should behave.  For example, the
@@ -3675,14 +3847,34 @@ export type Parameters = {
     */
     fdsPresenceStatusChoices?: boolean;
     /**
-    * Maximum step when generating initial choices for integer variables..
+    * Maximum number of initial choices on length of an interval variable.
     *
-    * For a variable with big initial domains, choices are generated only around min value considering the given step.
+    * When non-zero, this parameter limits the number of initial choices generated on length of an interval variable.
+    * When zero (the default), no choices on length are generated.
+    *
+    * The parameter takes an unsigned integer value  in range `0..2147483647`.
+    * The default value is `0`.
+    */
+    fdsMaxInitialLengthChoices?: number;
+    /**
+    * Maximum step when generating initial choices for length of an interval variable.
+    *
+    * Steps between choices for length of an interval variable are never bigger than the specified value.
+    *
     *
     * The parameter takes an unsigned integer value  in range `1..1073741823`.
-    * The default value is `107374182`.
+    * The default value is `1073741823`.
     */
-    fdsMaxInitialIntVarChoiceStep?: number;
+    fdsMinLengthChoiceStep?: number;
+    /**
+    * Minimum step when generating choices for integer variables..
+    *
+    * Steps between choices for integer variables are never smaller than the specified value.
+    *
+    * The parameter takes an unsigned integer value  in range `1..1073741823`.
+    * The default value is `1073741823`.
+    */
+    fdsMinIntVarChoiceStep?: number;
     /**
     * Influence of event time to initial choice rating.
     *
@@ -3873,6 +4065,31 @@ export type Parameters = {
     */
     _fdsImproveNogoods?: boolean;
     /**
+    * Controls which side of a choice is is explored first (considering the rating)..
+    *
+    * This option can take the following values:
+    *
+    * * `FailureFirst`: Explore the failure side first.
+    * * `FailureLast`: Explore the failure side last.
+    * * `Random`: Explore either side randomly.
+    *
+    * The default value is `FailureFirst`.
+    */
+    fdsBranchOrdering?: "FailureFirst" | "FailureLast" | "Random";
+    /**
+    *  @internal
+    * Use SetTimes when out of choices.
+    *
+    * When FDS runs out of choices (all choices are decided) then:
+    *   * the value is true: FDS does a SetTimes dive to find a solution
+    *   * the value is false: FDS binds all variables to their lower bounds and checks whether it is a solution
+    * In both cases, if a solution is not found, then FDS splits the domains further.
+    *
+    *
+    * The default value is `true`.
+    */
+    _fdsDiveBySetTimes?: boolean;
+    /**
     * A strategy to choose objective cuts during FDSLB search..
     *
     * Possible values are:
@@ -3942,16 +4159,6 @@ export type Parameters = {
     * The default value is `true`.
     */
     _lnsAggressiveDominance?: boolean;
-    /**
-    *  @internal
-    * Probability to choose differently than by the heuristic.
-    *
-    * blah blah
-    *
-    * The parameter takes a floating point value  in range `0.000000..1.000000`.
-    * The default value is `0`.
-    */
-    _lnsViolateHeuristicsProbability?: number;
     /**
     *  @internal
     * How many times iterate on the current solution (unless new one is found).
@@ -4051,6 +4258,45 @@ export type Parameters = {
     * The default value is `true`.
     */
     _lnsResourceOptimization?: boolean;
+    /**
+    *  @internal
+    * Whether to restore absent interval variables in LNS steps.
+    *
+    * When this parameter is on (the default), then intervals that are absent in the current solution
+    * remain absent in the current step, unless relaxed. If the parameter is off, then absent intervals
+    * are optional during all LNS steps.
+    *
+    * The default value is `true`.
+    */
+    _lnsRestoreAbsentIntervals?: boolean;
+    /**
+    *  @internal
+    * Whether to restore lengths of interval variables in LNS steps.
+    *
+    * When this parameter is on, then interval lengths are restored to their values in the current solution,
+    * unless the interval is relaxed. If the parameter is off (the default), then interval lengths are not restored.
+    *
+    * The default value is `false`.
+    */
+    _lnsRestoreIntervalLengths?: boolean;
+    /**
+    *  @internal
+    * Always restore values of non-relaxed integer variables.
+    *
+    * When this parameter is set, values of not-relaxed integer variables are restored in every LNS step.
+    * If the parameter is not set, only the presence status of those intVars is restored.
+    *
+    * The default value is `true`.
+    */
+    _lnsRestoreIntVarValues?: boolean;
+    /**
+    * Use only the user-provided warm start as the initial solution in LNS.
+    *
+    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
+    *
+    * The default value is `false`.
+    */
+    lnsUseWarmStartOnly?: boolean;
     /**
     *  @internal
     * Probability to chose heuristics randomly.
@@ -4240,15 +4486,6 @@ export type Parameters = {
     _lnsNeighborhoodInitialQ?: number;
     /**
     *  @internal
-    * Use only the user-provided warm start as the initial solution in LNS.
-    *
-    * When this parameter is on, the solver will use only the user-specified warm start solution for the initial solution phase in LNS. If no warm start is provided, the solver will search for its own initial solution as usual.
-    *
-    * The default value is `false`.
-    */
-    _lnsUseWarmStartOnly?: boolean;
-    /**
-    *  @internal
     * How many dives before switching to normal LNS.
     *
     * blah blah
@@ -4285,6 +4522,44 @@ export type Parameters = {
     * The default value is `false`.
     */
     _lnsStayOnObjective?: boolean;
+    /**
+    *  @internal
+    * Use FDS inside LNS.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsFDS?: boolean;
+    /**
+    *  @internal
+    * Freeze interval variables before the relaxed fragment.
+    *
+    * blah blah
+    *
+    * The default value is `false`.
+    */
+    _lnsFreezeIntervalsBeforeFragment?: boolean;
+    /**
+    *  @internal
+    * How m  uch to relax bounds of relaxed interval variables.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0.000000..1.000000`.
+    * The default value is `1`.
+    */
+    _lnsRelaxSlack?: number;
+    /**
+    *  @internal
+    * Size of the relaxed fragment is multiplied by this factor.
+    *
+    * blah blah
+    *
+    * The parameter takes a floating point value  in range `0.010000..10.000000`.
+    * The default value is `1`.
+    */
+    _lnsPortionMultiplier?: number;
     /**
     * Which worker computes simple lower bound.
     *
@@ -4529,6 +4804,46 @@ export type Parameters = {
     _setTimesItvMappingStrategy?: "FromMax" | "FromMin" | "Random";
     /**
     *  @internal
+    * Initial density for SetTimes (nb of intervals / time unit).
+    *
+    *
+    *
+    * The parameter takes a floating point value  in range `0.000000..Infinity`.
+    * The default value is `0`.
+    */
+    _setTimesInitDensity?: number;
+    /**
+    *  @internal
+    * For how many iterations to use arithmetic average for density computation.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `20`.
+    */
+    _setTimesDensityLength?: number;
+    /**
+    *  @internal
+    * After how many iterations density is considered reliable.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `10`.
+    */
+    _setTimesDensityReliabilityThreshold?: number;
+    /**
+    *  @internal
+    * Multiply nbRemainingExtends by this factor.
+    *
+    *
+    *
+    * The parameter takes a floating point value  in range `0.000000..Infinity`.
+    * The default value is `0.5`.
+    */
+    _setTimesNbExtendsFactor?: number;
+    /**
+    *  @internal
     * Maximum capacity to use low-capacity timetable algorithm.
     *
     *
@@ -4575,6 +4890,35 @@ export type Parameters = {
     * The default value is `false`.
     */
     _useReservoirPegging?: boolean;
+    /**
+    *  @internal
+    * Whether to use TimeNet.
+    *
+    *
+    *
+    * The default value is `true`.
+    */
+    _useTimeNet?: boolean;
+    /**
+    *  @internal
+    * Number of variables to process after objective cut before processing TimeNet.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value.
+    * The default value is `3`.
+    */
+    _timeNetVarsToPreprocess?: number;
+    /**
+    *  @internal
+    * Number of last bits in priority for At precedences.
+    *
+    *
+    *
+    * The parameter takes an unsigned integer value  in range `4..20`.
+    * The default value is `10`.
+    */
+    _timeNetSubPriorityBits?: number;
 };
 /**
  * This function creates a deep copy of the input {@link Parameters} object.
@@ -6117,13 +6461,13 @@ export declare class Model {
     * the task `tasks[t]` is assigned to.  Only present tasks are assigned:
     * $$
     * \mathtt{
-    *   \forall t \in \mathrm{0,\dots,T-1:} \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
+    *   \forall t \in \mathrm{ \{0,\dots,T-1\} }: \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
     * }
     * $$
     * Each task is synchronized with the slot to which it is assigned:
     * $$
     * \begin{aligned}
-    * \mathtt{\forall t \in \mathrm{0,\dots,T-1} \text{ such that } tasks[t] \ne \text{absent:}} \\
+    * \mathtt{\forall t \in \mathrm{ \{0,\dots,T-1\} } \text{ such that } tasks[t] \ne \text{absent:}} \\
     *     \mathtt{slots[indices[t]]} &\ne \textrm{absent} \\
     *     \mathtt{startOf(tasks[t])} &= \mathtt{startOf(slots[indices[t]]) }\\
     *     \mathtt{endOf(tasks[t])} &= \mathtt{endOf(slots[indices[t]])}
@@ -6131,13 +6475,13 @@ export declare class Model {
     * $$
     * A slot is present if and only if there is a task assigned to it:
     * $$
-    * \forall \mathtt{s} \in 0,\dots,S-1:\;
+    * \forall \mathtt{s} \in \{0,\dots,S-1\}:\;
     * \mathtt{presenceOf(tasks[s])} \;\Leftrightarrow\; (\exists \mathtt{t} \in 0,\dots,T-1: \mathtt{indices[t]=s})
     * $$
     * Absent slots are positioned at the end of the array:
     * $$
     * \mathtt{
-    *    \forall s \in \mathrm{1,\dots,S-1}:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
+    *    \forall s \in \mathrm{ \{1,\dots,S-1\} }:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
     * }
     * $$
     * Present slots are sorted by both start and end:
@@ -6151,7 +6495,7 @@ export declare class Model {
     * $$
     *
     * The amount of the propagation for this constraint can be controlled by parameter
-    * {@link Parameters.packPropagationLevel}.
+    * {@link Parameters.itvMappingPropagationLevel}.
     *
     * @see {@link Model.pack} for limiting the amount of tasks assigned to a slot.
     *  */
@@ -6722,9 +7066,13 @@ export declare class Model {
     /** @internal */
     _decisionOptionalEndLT(variable: IntervalVar, bound: number, isLeft: boolean): SearchDecision;
     /** @internal */
+    _decisionPresentLengthLE(variable: IntervalVar, bound: number, isLeft: boolean): SearchDecision;
+    /** @internal */
+    _decisionOptionalLengthGT(variable: IntervalVar, bound: number, isLeft: boolean): SearchDecision;
+    /** @internal */
     _noGood(decisions: SearchDecision[]): void;
     /** @internal */
-    _related(x: IntervalVar, y: IntervalVar): void;
+    _related(x: IntervalVar, y: IntervalVar): Directive;
     /** @internal */
     pack(load: (IntExpr | number)[], where: (IntExpr | number)[], sizes: number[]): void;
     /**
@@ -6904,7 +7252,7 @@ export declare class Model {
     /** @internal */
     constraint(constraint: Constraint): void;
     /** @internal */
-    _addBlank(blank: Blank): void;
+    _addDirective(directive: Directive): void;
     /** @internal */
     boolConst(value: boolean): BoolExpr;
     /** @internal */
@@ -7259,7 +7607,9 @@ export declare class Model {
     getIntervalVars(): Array<IntervalVar>;
     /** @internal */
     getBoolVars(): Array<BoolVar>;
-    /** @internal */
+    /**
+     * Returns an array of all interval variables in the model.
+     */
     getIntVars(): Array<IntVar>;
 }
 /**

@@ -23,7 +23,7 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export const Version = "2025.8.0";
+export const Version = "2025.11.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -171,12 +171,12 @@ export class ModelNode {
 /**
  * @internal
  */
-class Blank extends ModelNode {
-    #isBlankNode;
+class Directive extends ModelNode {
+    #isDirectiveNode;
     /** @internal */
     constructor(cp, func, args) {
         super(cp, func, args);
-        cp._addBlank(this);
+        cp._addDirective(this);
     }
 }
 /**
@@ -212,121 +212,102 @@ export class FloatExpr extends ModelNode {
     /** @internal */
     _reusableFloatExpr() {
         let outParams = [this._getArg()];
-        const result = new FloatExpr(this._cp, "reusableFloatExpr", outParams);
-        return result;
+        return new FloatExpr(this._cp, "reusableFloatExpr", outParams);
     }
     /** @internal */
     _floatIdentity(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new Constraint(this._cp, "floatIdentity", outParams);
+        new Constraint(this._cp, "floatIdentity", outParams);
     }
     /** @internal */
     _floatGuard(absentValue = 0) {
         let outParams = [this._getArg(), GetFloat(absentValue)];
-        const result = new FloatExpr(this._cp, "floatGuard", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatGuard", outParams);
     }
     /** @internal */
     neg() {
         let outParams = [this._getArg()];
-        const result = new FloatExpr(this._cp, "floatNeg", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatNeg", outParams);
     }
     /** @internal */
     _floatPlus(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatPlus", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatPlus", outParams);
     }
     /** @internal */
     _floatMinus(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatMinus", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatMinus", outParams);
     }
     /** @internal */
     _floatTimes(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatTimes", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatTimes", outParams);
     }
     /** @internal */
     _floatDiv(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatDiv", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatDiv", outParams);
     }
     /** @internal */
     _floatEq(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatEq", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatEq", outParams);
     }
     /** @internal */
     _floatNe(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatNe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatNe", outParams);
     }
     /** @internal */
     _floatLt(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatLt", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatLt", outParams);
     }
     /** @internal */
     _floatLe(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatLe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatLe", outParams);
     }
     /** @internal */
     _floatGt(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatGt", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatGt", outParams);
     }
     /** @internal */
     _floatGe(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new BoolExpr(this._cp, "floatGe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatGe", outParams);
     }
     /** @internal */
     _floatInRange(lb, ub) {
         let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
-        const result = new BoolExpr(this._cp, "floatInRange", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatInRange", outParams);
     }
     /** @internal */
     _floatNotInRange(lb, ub) {
         let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
-        const result = new BoolExpr(this._cp, "floatNotInRange", outParams);
-        return result;
+        return new BoolExpr(this._cp, "floatNotInRange", outParams);
     }
     /** @internal */
     abs() {
         let outParams = [this._getArg()];
-        const result = new FloatExpr(this._cp, "floatAbs", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatAbs", outParams);
     }
     /** @internal */
     square() {
         let outParams = [this._getArg()];
-        const result = new FloatExpr(this._cp, "floatSquare", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatSquare", outParams);
     }
     /** @internal */
     _floatMin2(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatMin2", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatMin2", outParams);
     }
     /** @internal */
     _floatMax2(arg) {
         let outParams = [this._getArg(), GetFloatExpr(arg)];
-        const result = new FloatExpr(this._cp, "floatMax2", outParams);
-        return result;
+        return new FloatExpr(this._cp, "floatMax2", outParams);
     }
 }
 /**
@@ -436,8 +417,7 @@ export class IntExpr extends FloatExpr {
     /** @internal */
     _reusableIntExpr() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "reusableIntExpr", outParams);
-        return result;
+        return new IntExpr(this._cp, "reusableIntExpr", outParams);
     }
     /**
     * Returns an expression which is _true_ if the expression is _present_ and _false_ when it is _absent_.
@@ -449,8 +429,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.presenceOf | Model.presenceOf}. */
     presence() {
         let outParams = [this._getArg()];
-        const result = new BoolExpr(this._cp, "intPresenceOf", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intPresenceOf", outParams);
     }
     /**
     * Creates an expression that replaces value _absent_ by a constant.
@@ -469,8 +448,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.guard | Model.guard}. */
     guard(absentValue = 0) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        const result = new IntExpr(this._cp, "intGuard", outParams);
-        return result;
+        return new IntExpr(this._cp, "intGuard", outParams);
     }
     /**
     * Returns negation of the expression.
@@ -482,8 +460,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.neg | Model.neg}. */
     neg() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "intNeg", outParams);
-        return result;
+        return new IntExpr(this._cp, "intNeg", outParams);
     }
     /**
     * Returns addition of the expression and the argument.
@@ -495,8 +472,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.plus | Model.plus}. */
     plus(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intPlus", outParams);
-        return result;
+        return new IntExpr(this._cp, "intPlus", outParams);
     }
     /**
     * Returns subtraction of the expression and `arg`.@remarks
@@ -506,8 +482,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.minus | Model.minus}. */
     minus(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intMinus", outParams);
-        return result;
+        return new IntExpr(this._cp, "intMinus", outParams);
     }
     /**
     * Returns multiplication of the expression and `arg`.@remarks
@@ -517,8 +492,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.times | Model.times}. */
     times(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intTimes", outParams);
-        return result;
+        return new IntExpr(this._cp, "intTimes", outParams);
     }
     /**
     * Returns integer division of the expression `arg`. The division rounds towards zero.
@@ -530,14 +504,12 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.div | Model.div}. */
     div(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intDiv", outParams);
-        return result;
+        return new IntExpr(this._cp, "intDiv", outParams);
     }
     /** @internal */
     _modulo(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "modulo", outParams);
-        return result;
+        return new IntExpr(this._cp, "modulo", outParams);
     }
     /**
     * Constrains the expression to be identical to the argument, including their presence status.
@@ -549,7 +521,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.identity | Model.identity}. */
     identity(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new Constraint(this._cp, "intIdentity", outParams);
+        new Constraint(this._cp, "intIdentity", outParams);
     }
     /**
     * Creates Boolean expression `this` = `arg`.
@@ -563,8 +535,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.eq | Model.eq}. */
     eq(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intEq", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intEq", outParams);
     }
     /**
     * Creates Boolean expression `this` &ne; `arg`.
@@ -578,8 +549,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.ne | Model.ne}. */
     ne(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intNe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intNe", outParams);
     }
     /**
     * Creates Boolean expression `this` < `arg`.
@@ -593,8 +563,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.lt | Model.lt}. */
     lt(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intLt", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intLt", outParams);
     }
     /**
     * Creates Boolean expression `this` &le; `arg`.
@@ -608,8 +577,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.le | Model.le}. */
     le(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intLe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intLe", outParams);
     }
     /**
     * Creates Boolean expression `this` > `arg`.
@@ -623,8 +591,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.gt | Model.gt}. */
     gt(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intGt", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intGt", outParams);
     }
     /**
     * Creates Boolean expression `this` &ge; `arg`.
@@ -638,8 +605,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.ge | Model.ge}. */
     ge(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new BoolExpr(this._cp, "intGe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intGe", outParams);
     }
     /**
     * Creates Boolean expression `lb` &le; `this` &le; `ub`.
@@ -653,14 +619,12 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.inRange | Model.inRange}. */
     inRange(lb, ub) {
         let outParams = [this._getArg(), GetInt(lb), GetInt(ub)];
-        const result = new BoolExpr(this._cp, "intInRange", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intInRange", outParams);
     }
     /** @internal */
     _notInRange(lb, ub) {
         let outParams = [this._getArg(), GetInt(lb), GetInt(ub)];
-        const result = new BoolExpr(this._cp, "intNotInRange", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intNotInRange", outParams);
     }
     /**
     * Creates an integer expression which is absolute value of the expression.
@@ -672,8 +636,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.abs | Model.abs}.  */
     abs() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "intAbs", outParams);
-        return result;
+        return new IntExpr(this._cp, "intAbs", outParams);
     }
     /**
     * Creates an integer expression which is the minimum of the expression and `arg`.
@@ -685,8 +648,7 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.min2 | Model.min2}. See {@link Model.min} for the n-ary minimum. */
     min2(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intMin2", outParams);
-        return result;
+        return new IntExpr(this._cp, "intMin2", outParams);
     }
     /**
     * Creates an integer expression which is the maximum of the expression and `arg`.
@@ -698,14 +660,12 @@ export class IntExpr extends FloatExpr {
     * Same as {@link Model.max2 | Model.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
     max2(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intMax2", outParams);
-        return result;
+        return new IntExpr(this._cp, "intMax2", outParams);
     }
     /** @internal */
     square() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "intSquare", outParams);
-        return result;
+        return new IntExpr(this._cp, "intSquare", outParams);
     }
 }
 /**
@@ -796,8 +756,7 @@ export class BoolExpr extends IntExpr {
     /** @internal */
     _reusableBoolExpr() {
         let outParams = [this._getArg()];
-        const result = new BoolExpr(this._cp, "reusableBoolExpr", outParams);
-        return result;
+        return new BoolExpr(this._cp, "reusableBoolExpr", outParams);
     }
     /**
     * Returns negation of the expression.
@@ -809,8 +768,7 @@ export class BoolExpr extends IntExpr {
     * Same as {@link Model.not | Model.not}. */
     not() {
         let outParams = [this._getArg()];
-        const result = new BoolExpr(this._cp, "boolNot", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolNot", outParams);
     }
     /**
     * Returns logical _OR_ of the expression and `arg`.
@@ -822,8 +780,7 @@ export class BoolExpr extends IntExpr {
     * Same as {@link Model.or | Model.or}. */
     or(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolOr", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolOr", outParams);
     }
     /**
     * Returns logical _AND_ of the expression and `arg`.
@@ -835,8 +792,7 @@ export class BoolExpr extends IntExpr {
     * Same as {@link Model.and | Model.and}. */
     and(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolAnd", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolAnd", outParams);
     }
     /**
     * Returns implication between the expression and `arg`.
@@ -848,26 +804,22 @@ export class BoolExpr extends IntExpr {
     * Same as {@link Model.implies | Model.implies}. */
     implies(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolImplies", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolImplies", outParams);
     }
     /** @internal */
     _eq(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolEq", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolEq", outParams);
     }
     /** @internal */
     _ne(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolNe", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolNe", outParams);
     }
     /** @internal */
     _nand(arg) {
         let outParams = [this._getArg(), GetBoolExpr(arg)];
-        const result = new BoolExpr(this._cp, "boolNand", outParams);
-        return result;
+        return new BoolExpr(this._cp, "boolNand", outParams);
     }
 }
 /** @internal */
@@ -1391,7 +1343,7 @@ export class IntervalVar extends ModelNode {
      * {@link setLength} or {@link setLengthMax}.
      * This function does not change the minimum length.
      *
-     * Note that the length of the interval cannot exceed than {@link LengthMax}.
+     * Note that the length of the interval must not exceed {@link LengthMax}.
      *
      * @see {@link setLength}, {@link setLengthMin}
      * @see {@link getLengthMin}, {@link getLengthMax}
@@ -1408,8 +1360,7 @@ export class IntervalVar extends ModelNode {
     * This function is the same as {@link Model.presenceOf | Model.presenceOf}, see its documentation for more details. */
     presence() {
         let outParams = [this._getArg()];
-        const result = new BoolExpr(this._cp, "intervalPresenceOf", outParams);
-        return result;
+        return new BoolExpr(this._cp, "intervalPresenceOf", outParams);
     }
     /**
     * Creates an integer expression for the start of the interval variable.
@@ -1437,8 +1388,7 @@ export class IntervalVar extends ModelNode {
     *  */
     start() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "startOf", outParams);
-        return result;
+        return new IntExpr(this._cp, "startOf", outParams);
     }
     /**
     * Creates an integer expression for the end of the interval variable.
@@ -1466,8 +1416,7 @@ export class IntervalVar extends ModelNode {
     *  */
     end() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "endOf", outParams);
-        return result;
+        return new IntExpr(this._cp, "endOf", outParams);
     }
     /**
     * Creates an integer expression for the length of the interval variable.
@@ -1495,8 +1444,7 @@ export class IntervalVar extends ModelNode {
     *  */
     length() {
         let outParams = [this._getArg()];
-        const result = new IntExpr(this._cp, "lengthOf", outParams);
-        return result;
+        return new IntExpr(this._cp, "lengthOf", outParams);
     }
     /**
     * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -1510,8 +1458,7 @@ export class IntervalVar extends ModelNode {
     *  */
     startOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        const result = new IntExpr(this._cp, "startOr", outParams);
-        return result;
+        return new IntExpr(this._cp, "startOr", outParams);
     }
     /**
     * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -1525,8 +1472,7 @@ export class IntervalVar extends ModelNode {
     *  */
     endOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        const result = new IntExpr(this._cp, "endOr", outParams);
-        return result;
+        return new IntExpr(this._cp, "endOr", outParams);
     }
     /**
     * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -1540,20 +1486,17 @@ export class IntervalVar extends ModelNode {
     *  */
     lengthOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        const result = new IntExpr(this._cp, "lengthOr", outParams);
-        return result;
+        return new IntExpr(this._cp, "lengthOr", outParams);
     }
     /** @internal */
     _overlapLength(interval2) {
         let outParams = [this._getArg(), GetIntervalVar(interval2)];
-        const result = new IntExpr(this._cp, "overlapLength", outParams);
-        return result;
+        return new IntExpr(this._cp, "overlapLength", outParams);
     }
     /** @internal */
     _alternativeCost(options, weights) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(options), this._cp._getIntArray(weights)];
-        const result = new IntExpr(this._cp, "intAlternativeCost", outParams);
-        return result;
+        return new IntExpr(this._cp, "intAlternativeCost", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1577,8 +1520,7 @@ export class IntervalVar extends ModelNode {
     *  */
     endBeforeEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "endBeforeEnd", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "endBeforeEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1602,8 +1544,7 @@ export class IntervalVar extends ModelNode {
     *  */
     endBeforeStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "endBeforeStart", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "endBeforeStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1627,8 +1568,7 @@ export class IntervalVar extends ModelNode {
     *  */
     startBeforeEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "startBeforeEnd", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "startBeforeEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1652,8 +1592,7 @@ export class IntervalVar extends ModelNode {
     *  */
     startBeforeStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "startBeforeStart", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "startBeforeStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1677,8 +1616,7 @@ export class IntervalVar extends ModelNode {
     *  */
     endAtEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "endAtEnd", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "endAtEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1702,8 +1640,7 @@ export class IntervalVar extends ModelNode {
     *  */
     endAtStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "endAtStart", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "endAtStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1727,8 +1664,7 @@ export class IntervalVar extends ModelNode {
     *  */
     startAtEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "startAtEnd", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "startAtEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -1752,8 +1688,7 @@ export class IntervalVar extends ModelNode {
     *  */
     startAtStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this._cp, "startAtStart", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "startAtStart", outParams);
     }
     /**
     * Creates alternative constraints for the interval variable and provided `options`.
@@ -1765,7 +1700,7 @@ export class IntervalVar extends ModelNode {
     * This constraint is the same as {@link Model.alternative}. */
     alternative(options) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(options)];
-        const result = new Constraint(this._cp, "alternative", outParams);
+        new Constraint(this._cp, "alternative", outParams);
     }
     /**
     * Constraints the interval variable to span (cover) a set of other interval variables.
@@ -1777,7 +1712,7 @@ export class IntervalVar extends ModelNode {
     * This constraint is the same as {@link Model.span}. */
     span(covered) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(covered)];
-        const result = new Constraint(this._cp, "span", outParams);
+        new Constraint(this._cp, "span", outParams);
     }
     /**
     * Creates an expression equal to the position of the interval on the sequence.
@@ -1787,8 +1722,7 @@ export class IntervalVar extends ModelNode {
     * This function is the same as {@link Model.position | Model.position}. */
     position(sequence) {
         let outParams = [this._getArg(), GetSequenceVar(sequence)];
-        const result = new IntExpr(this._cp, "position", outParams);
-        return result;
+        return new IntExpr(this._cp, "position", outParams);
     }
     /**
     * Creates cumulative function (expression) _pulse_ for the interval variable and specified height.
@@ -1799,8 +1733,7 @@ export class IntervalVar extends ModelNode {
     *  */
     pulse(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        const result = new CumulExpr(this._cp, "pulse", outParams);
-        return result;
+        return new CumulExpr(this._cp, "pulse", outParams);
     }
     /**
     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
@@ -1811,8 +1744,7 @@ export class IntervalVar extends ModelNode {
     *  */
     stepAtStart(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        const result = new CumulExpr(this._cp, "stepAtStart", outParams);
-        return result;
+        return new CumulExpr(this._cp, "stepAtStart", outParams);
     }
     /**
     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
@@ -1823,20 +1755,17 @@ export class IntervalVar extends ModelNode {
     *  */
     stepAtEnd(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        const result = new CumulExpr(this._cp, "stepAtEnd", outParams);
-        return result;
+        return new CumulExpr(this._cp, "stepAtEnd", outParams);
     }
     /** @internal */
     _precedenceEnergyBefore(others, heights, capacity) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(others), this._cp._getIntArray(heights), GetInt(capacity)];
-        const result = new Constraint(this._cp, "precedenceEnergyBefore", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "precedenceEnergyBefore", outParams);
     }
     /** @internal */
     _precedenceEnergyAfter(others, heights, capacity) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(others), this._cp._getIntArray(heights), GetInt(capacity)];
-        const result = new Constraint(this._cp, "precedenceEnergyAfter", outParams);
-        this._cp.constraint(result);
+        new Constraint(this._cp, "precedenceEnergyAfter", outParams);
     }
     /**
     * Forbid the interval variable to overlap with segments of the function where the value is zero.
@@ -1851,7 +1780,7 @@ export class IntervalVar extends ModelNode {
     *  */
     forbidExtent(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        const result = new Constraint(this._cp, "forbidExtent", outParams);
+        new Constraint(this._cp, "forbidExtent", outParams);
     }
     /**
     * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
@@ -1872,7 +1801,7 @@ export class IntervalVar extends ModelNode {
     *  */
     forbidStart(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        const result = new Constraint(this._cp, "forbidStart", outParams);
+        new Constraint(this._cp, "forbidStart", outParams);
     }
     /**
     * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
@@ -1893,18 +1822,17 @@ export class IntervalVar extends ModelNode {
     *  */
     forbidEnd(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        const result = new Constraint(this._cp, "forbidEnd", outParams);
+        new Constraint(this._cp, "forbidEnd", outParams);
     }
     /** @internal */
     _disjunctiveIsBefore(y) {
         let outParams = [this._getArg(), GetIntervalVar(y)];
-        const result = new BoolExpr(this._cp, "disjunctiveIsBefore", outParams);
-        return result;
+        return new BoolExpr(this._cp, "disjunctiveIsBefore", outParams);
     }
     /** @internal */
     _related(y) {
         let outParams = [this._getArg(), GetIntervalVar(y)];
-        const result = new Blank(this._cp, "related", outParams);
+        return new Directive(this._cp, "related", outParams);
     }
 }
 // TODO:2 When we have other constraints on sequenceVar then add links into the following doc.
@@ -2037,12 +1965,12 @@ export class SequenceVar extends ModelNode {
         let outParams = [this._getArg()];
         if (transitions !== undefined)
             outParams.push(this._cp._getIntMatrix(transitions));
-        const result = new Constraint(this._cp, "noOverlap", outParams);
+        new Constraint(this._cp, "noOverlap", outParams);
     }
     /** @internal */
     _sameSequence(sequence2) {
         let outParams = [this._getArg(), GetSequenceVar(sequence2)];
-        const result = new Constraint(this._cp, "sameSequence", outParams);
+        new Constraint(this._cp, "sameSequence", outParams);
     }
 }
 /**
@@ -2098,8 +2026,7 @@ export class CumulExpr extends ModelNode {
     *  */
     cumulPlus(rhs) {
         let outParams = [this._getArg(), GetCumulExpr(rhs)];
-        const result = new CumulExpr(this._cp, "cumulPlus", outParams);
-        return result;
+        return new CumulExpr(this._cp, "cumulPlus", outParams);
     }
     /**
     * Subtraction of two cumulative expressions.
@@ -2110,8 +2037,7 @@ export class CumulExpr extends ModelNode {
     *  */
     cumulMinus(rhs) {
         let outParams = [this._getArg(), GetCumulExpr(rhs)];
-        const result = new CumulExpr(this._cp, "cumulMinus", outParams);
-        return result;
+        return new CumulExpr(this._cp, "cumulMinus", outParams);
     }
     /**
     * Negation of a cumulative expression.
@@ -2122,8 +2048,7 @@ export class CumulExpr extends ModelNode {
     *  */
     cumulNeg() {
         let outParams = [this._getArg()];
-        const result = new CumulExpr(this._cp, "cumulNeg", outParams);
-        return result;
+        return new CumulExpr(this._cp, "cumulNeg", outParams);
     }
     /**
     * Constraints the cumulative function to be everywhere less or equal to `maxCapacity`.
@@ -2136,7 +2061,7 @@ export class CumulExpr extends ModelNode {
     *  */
     cumulLe(maxCapacity) {
         let outParams = [this._getArg(), GetInt(maxCapacity)];
-        const result = new Constraint(this._cp, "cumulLe", outParams);
+        new Constraint(this._cp, "cumulLe", outParams);
     }
     /**
     * Constraints the cumulative function to be everywhere greater or equal to `minCapacity`.
@@ -2149,17 +2074,17 @@ export class CumulExpr extends ModelNode {
     *  */
     cumulGe(minCapacity) {
         let outParams = [this._getArg(), GetInt(minCapacity)];
-        const result = new Constraint(this._cp, "cumulGe", outParams);
+        new Constraint(this._cp, "cumulGe", outParams);
     }
     /** @internal */
     _cumulMaxProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
-        const result = new Constraint(this._cp, "cumulMaxProfile", outParams);
+        new Constraint(this._cp, "cumulMaxProfile", outParams);
     }
     /** @internal */
     _cumulMinProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
-        const result = new Constraint(this._cp, "cumulMinProfile", outParams);
+        new Constraint(this._cp, "cumulMinProfile", outParams);
     }
 }
 /**
@@ -2202,13 +2127,12 @@ export class IntStepFunction extends ModelNode {
     *  */
     stepFunctionSum(interval) {
         let outParams = [this._getArg(), GetIntervalVar(interval)];
-        const result = new IntExpr(this._cp, "intStepFunctionSum", outParams);
-        return result;
+        return new IntExpr(this._cp, "intStepFunctionSum", outParams);
     }
     /** @internal */
     _stepFunctionSumInRange(interval, lb, ub) {
         let outParams = [this._getArg(), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this._cp, "intStepFunctionSumInRange", outParams);
+        new Constraint(this._cp, "intStepFunctionSumInRange", outParams);
     }
     /**
     * Evaluates the step function at a given point.
@@ -2224,18 +2148,17 @@ export class IntStepFunction extends ModelNode {
     *  */
     stepFunctionEval(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        const result = new IntExpr(this._cp, "intStepFunctionEval", outParams);
-        return result;
+        return new IntExpr(this._cp, "intStepFunctionEval", outParams);
     }
     /** @internal */
     _stepFunctionEvalInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this._cp, "intStepFunctionEvalInRange", outParams);
+        new Constraint(this._cp, "intStepFunctionEvalInRange", outParams);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this._cp, "intStepFunctionEvalNotInRange", outParams);
+        new Constraint(this._cp, "intStepFunctionEvalNotInRange", outParams);
     }
 }
 /** @internal */
@@ -2505,8 +2428,10 @@ Failure-Directed Search:\n\
                                    Maximum number of choices generated initially per a variable\n\
   --fdsAdditionalStepRatio double  Domain split ratio when run out of choices\n\
   --fdsPresenceStatusChoices bool  Whether to generate choices on presence status\n\
-  --fdsMaxInitialIntVarChoiceStep uint32\n\
-                                   Maximum step when generating initial choices for integer variables.\n\
+  --fdsMaxInitialLengthChoices uint32\n\
+                                   Maximum number of initial choices on length of an interval variable\n\
+  --fdsMinLengthChoiceStep uint32  Maximum step when generating initial choices for length of an interval variable\n\
+  --fdsMinIntVarChoiceStep uint32  Minimum step when generating choices for integer variables.\n\
   --fdsEventTimeInfluence double   Influence of event time to initial choice rating\n\
   --fdsBothFailRewardFactor double\n\
                                    How much to improve rating when both branches fail immediately\n\
@@ -2528,9 +2453,14 @@ Failure-Directed Search:\n\
                                    Reset restart size after a solution is found (ignored in Luby)\n\
   --fdsUseNogoods bool             Whether to use or not nogood constraints\n\
   --fdsBranchOnObjective bool      Whether to generate choices for objective expression/variable\n\
+  --fdsBranchOrdering FailureFirst|FailureLast|Random\n\
+                                   Controls which side of a choice is is explored first (considering the rating).\n\
   --fdsLBStrategy Minimum|Random|Split\n\
                                    A strategy to choose objective cuts during FDSLB search.\n\
   --fdsLBResetRatings bool         Whether to reset ratings when a new LB is proved\n\
+\n\
+Large Neighborhood Search:\n\
+  --lnsUseWarmStartOnly bool       Use only the user-provided warm start as the initial solution in LNS\n\
 \n\
 Simple Lower Bound:\n\
   --simpleLBWorker int32           Which worker computes simple lower bound\n\
@@ -3249,13 +3179,29 @@ let ParameterCatalog = {
     setFDSPresenceStatusChoices: function (workerParams, value) {
         workerParams.fdsPresenceStatusChoices = value;
     },
-    // FDSMaxInitialIntVarChoiceStep
-    setFDSMaxInitialIntVarChoiceStep: function (workerParams, value) {
+    // FDSMaxInitialLengthChoices
+    setFDSMaxInitialLengthChoices: function (workerParams, value) {
         if (!Number.isInteger(value))
-            throw Error("Parameter FDSMaxInitialIntVarChoiceStep: value " + value + " is not an integer.");
+            throw Error("Parameter FDSMaxInitialLengthChoices: value " + value + " is not an integer.");
+        if (value < 0 || value > 2147483647)
+            throw Error("Parameter FDSMaxInitialLengthChoices: value " + value + " is not in required range 0..2147483647.");
+        workerParams.fdsMaxInitialLengthChoices = value;
+    },
+    // FDSMinLengthChoiceStep
+    setFDSMinLengthChoiceStep: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter FDSMinLengthChoiceStep: value " + value + " is not an integer.");
         if (value < 1 || value > 1073741823)
-            throw Error("Parameter FDSMaxInitialIntVarChoiceStep: value " + value + " is not in required range 1..1073741823.");
-        workerParams.fdsMaxInitialIntVarChoiceStep = value;
+            throw Error("Parameter FDSMinLengthChoiceStep: value " + value + " is not in required range 1..1073741823.");
+        workerParams.fdsMinLengthChoiceStep = value;
+    },
+    // FDSMinIntVarChoiceStep
+    setFDSMinIntVarChoiceStep: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter FDSMinIntVarChoiceStep: value " + value + " is not an integer.");
+        if (value < 1 || value > 1073741823)
+            throw Error("Parameter FDSMinIntVarChoiceStep: value " + value + " is not in required range 1..1073741823.");
+        workerParams.fdsMinIntVarChoiceStep = value;
     },
     // FDSEventTimeInfluence
     setFDSEventTimeInfluence: function (workerParams, value) {
@@ -3398,6 +3344,29 @@ let ParameterCatalog = {
     _setFDSImproveNogoods: function (workerParams, value) {
         workerParams._fdsImproveNogoods = value;
     },
+    // FDSBranchOrdering
+    setFDSBranchOrdering: function (workerParams, value) {
+        if (typeof value != 'string')
+            throw Error('Parameter FDSBranchOrdering: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'failurefirst':
+                value = 'FailureFirst';
+                break;
+            case 'failurelast':
+                value = 'FailureLast';
+                break;
+            case 'random':
+                value = 'Random';
+                break;
+            default: throw Error('Parameter FDSBranchOrdering: value "' + value + '" is not valid.');
+        }
+        workerParams.fdsBranchOrdering = value;
+    },
+    // FDSDiveBySetTimes
+    /** @internal */
+    _setFDSDiveBySetTimes: function (workerParams, value) {
+        workerParams._fdsDiveBySetTimes = value;
+    },
     // FDSLBStrategy
     setFDSLBStrategy: function (workerParams, value) {
         if (typeof value != 'string')
@@ -3456,13 +3425,6 @@ let ParameterCatalog = {
     /** @internal */
     _setLNSAggressiveDominance: function (workerParams, value) {
         workerParams._lnsAggressiveDominance = value;
-    },
-    // LNSViolateHeuristicsProbability
-    /** @internal */
-    _setLNSViolateHeuristicsProbability: function (workerParams, value) {
-        if (value < 0.000000 || value > 1.000000)
-            throw Error("Parameter LNSViolateHeuristicsProbability: value " + value + " is not in required range 0.000000..1.000000.");
-        workerParams._lnsViolateHeuristicsProbability = value;
     },
     // LNSSameSolutionPeriod
     /** @internal */
@@ -3541,6 +3503,25 @@ let ParameterCatalog = {
     /** @internal */
     _setLNSResourceOptimization: function (workerParams, value) {
         workerParams._lnsResourceOptimization = value;
+    },
+    // LNSRestoreAbsentIntervals
+    /** @internal */
+    _setLNSRestoreAbsentIntervals: function (workerParams, value) {
+        workerParams._lnsRestoreAbsentIntervals = value;
+    },
+    // LNSRestoreIntervalLengths
+    /** @internal */
+    _setLNSRestoreIntervalLengths: function (workerParams, value) {
+        workerParams._lnsRestoreIntervalLengths = value;
+    },
+    // LNSRestoreIntVarValues
+    /** @internal */
+    _setLNSRestoreIntVarValues: function (workerParams, value) {
+        workerParams._lnsRestoreIntVarValues = value;
+    },
+    // LNSUseWarmStartOnly
+    setLNSUseWarmStartOnly: function (workerParams, value) {
+        workerParams.lnsUseWarmStartOnly = value;
     },
     // LNSHeuristicsEpsilon
     /** @internal */
@@ -3671,11 +3652,6 @@ let ParameterCatalog = {
             throw Error("Parameter LNSNeighborhoodInitialQ: value " + value + " is not in required range 0..1.");
         workerParams._lnsNeighborhoodInitialQ = value;
     },
-    // LNSUseWarmStartOnly
-    /** @internal */
-    _setLNSUseWarmStartOnly: function (workerParams, value) {
-        workerParams._lnsUseWarmStartOnly = value;
-    },
     // LNSDivingLimit
     /** @internal */
     _setLNSDivingLimit: function (workerParams, value) {
@@ -3701,6 +3677,30 @@ let ParameterCatalog = {
     /** @internal */
     _setLNSStayOnObjective: function (workerParams, value) {
         workerParams._lnsStayOnObjective = value;
+    },
+    // LNSFDS
+    /** @internal */
+    _setLNSFDS: function (workerParams, value) {
+        workerParams._lnsFDS = value;
+    },
+    // LNSFreezeIntervalsBeforeFragment
+    /** @internal */
+    _setLNSFreezeIntervalsBeforeFragment: function (workerParams, value) {
+        workerParams._lnsFreezeIntervalsBeforeFragment = value;
+    },
+    // LNSRelaxSlack
+    /** @internal */
+    _setLNSRelaxSlack: function (workerParams, value) {
+        if (value < 0.000000 || value > 1.000000)
+            throw Error("Parameter LNSRelaxSlack: value " + value + " is not in required range 0.000000..1.000000.");
+        workerParams._lnsRelaxSlack = value;
+    },
+    // LNSPortionMultiplier
+    /** @internal */
+    _setLNSPortionMultiplier: function (workerParams, value) {
+        if (value < 0.010000 || value > 10.000000)
+            throw Error("Parameter LNSPortionMultiplier: value " + value + " is not in required range 0.010000..10.000000.");
+        workerParams._lnsPortionMultiplier = value;
     },
     // SimpleLBWorker
     setSimpleLBWorker: function (workerParams, value) {
@@ -3914,6 +3914,38 @@ let ParameterCatalog = {
         }
         workerParams._setTimesItvMappingStrategy = value;
     },
+    // SetTimesInitDensity
+    /** @internal */
+    _setSetTimesInitDensity: function (workerParams, value) {
+        if (value < 0.000000 || value > Infinity)
+            throw Error("Parameter SetTimesInitDensity: value " + value + " is not in required range 0.000000..Infinity.");
+        workerParams._setTimesInitDensity = value;
+    },
+    // SetTimesDensityLength
+    /** @internal */
+    _setSetTimesDensityLength: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter SetTimesDensityLength: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter SetTimesDensityLength: value " + value + " is not in required range 0..4294967295.");
+        workerParams._setTimesDensityLength = value;
+    },
+    // SetTimesDensityReliabilityThreshold
+    /** @internal */
+    _setSetTimesDensityReliabilityThreshold: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter SetTimesDensityReliabilityThreshold: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter SetTimesDensityReliabilityThreshold: value " + value + " is not in required range 0..4294967295.");
+        workerParams._setTimesDensityReliabilityThreshold = value;
+    },
+    // SetTimesNbExtendsFactor
+    /** @internal */
+    _setSetTimesNbExtendsFactor: function (workerParams, value) {
+        if (value < 0.000000 || value > Infinity)
+            throw Error("Parameter SetTimesNbExtendsFactor: value " + value + " is not in required range 0.000000..Infinity.");
+        workerParams._setTimesNbExtendsFactor = value;
+    },
     // DiscreteLowCapacityLimit
     /** @internal */
     _setDiscreteLowCapacityLimit: function (workerParams, value) {
@@ -3946,6 +3978,29 @@ let ParameterCatalog = {
     /** @internal */
     _setUseReservoirPegging: function (workerParams, value) {
         workerParams._useReservoirPegging = value;
+    },
+    // UseTimeNet
+    /** @internal */
+    _setUseTimeNet: function (workerParams, value) {
+        workerParams._useTimeNet = value;
+    },
+    // TimeNetVarsToPreprocess
+    /** @internal */
+    _setTimeNetVarsToPreprocess: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter TimeNetVarsToPreprocess: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter TimeNetVarsToPreprocess: value " + value + " is not in required range 0..4294967295.");
+        workerParams._timeNetVarsToPreprocess = value;
+    },
+    // TimeNetSubPriorityBits
+    /** @internal */
+    _setTimeNetSubPriorityBits: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter TimeNetSubPriorityBits: value " + value + " is not an integer.");
+        if (value < 4 || value > 20)
+            throw Error("Parameter TimeNetSubPriorityBits: value " + value + " is not in required range 4..20.");
+        workerParams._timeNetSubPriorityBits = value;
     },
 };
 /** @internal */
@@ -4203,11 +4258,23 @@ let parserConfig = {
         setGlobally: ParameterCatalog.setFDSPresenceStatusChoices,
         setOnWorker: ParameterCatalog.setFDSPresenceStatusChoices,
     },
-    fdsmaxinitialintvarchoicestep: {
-        name: 'FDSMaxInitialIntVarChoiceStep',
+    fdsmaxinitiallengthchoices: {
+        name: 'FDSMaxInitialLengthChoices',
         parse: ParseNumber,
-        setGlobally: ParameterCatalog.setFDSMaxInitialIntVarChoiceStep,
-        setOnWorker: ParameterCatalog.setFDSMaxInitialIntVarChoiceStep,
+        setGlobally: ParameterCatalog.setFDSMaxInitialLengthChoices,
+        setOnWorker: ParameterCatalog.setFDSMaxInitialLengthChoices,
+    },
+    fdsminlengthchoicestep: {
+        name: 'FDSMinLengthChoiceStep',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setFDSMinLengthChoiceStep,
+        setOnWorker: ParameterCatalog.setFDSMinLengthChoiceStep,
+    },
+    fdsminintvarchoicestep: {
+        name: 'FDSMinIntVarChoiceStep',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setFDSMinIntVarChoiceStep,
+        setOnWorker: ParameterCatalog.setFDSMinIntVarChoiceStep,
     },
     fdseventtimeinfluence: {
         name: 'FDSEventTimeInfluence',
@@ -4323,6 +4390,18 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setFDSImproveNogoods,
         setOnWorker: ParameterCatalog._setFDSImproveNogoods,
     },
+    fdsbranchordering: {
+        name: 'FDSBranchOrdering',
+        parse: ParseString,
+        setGlobally: ParameterCatalog.setFDSBranchOrdering,
+        setOnWorker: ParameterCatalog.setFDSBranchOrdering,
+    },
+    fdsdivebysettimes: {
+        name: 'FDSDiveBySetTimes',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setFDSDiveBySetTimes,
+        setOnWorker: ParameterCatalog._setFDSDiveBySetTimes,
+    },
     fdslbstrategy: {
         name: 'FDSLBStrategy',
         parse: ParseString,
@@ -4364,12 +4443,6 @@ let parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setLNSAggressiveDominance,
         setOnWorker: ParameterCatalog._setLNSAggressiveDominance,
-    },
-    lnsviolateheuristicsprobability: {
-        name: 'LNSViolateHeuristicsProbability',
-        parse: ParseNumber,
-        setGlobally: ParameterCatalog._setLNSViolateHeuristicsProbability,
-        setOnWorker: ParameterCatalog._setLNSViolateHeuristicsProbability,
     },
     lnssamesolutionperiod: {
         name: 'LNSSameSolutionPeriod',
@@ -4430,6 +4503,30 @@ let parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setLNSResourceOptimization,
         setOnWorker: ParameterCatalog._setLNSResourceOptimization,
+    },
+    lnsrestoreabsentintervals: {
+        name: 'LNSRestoreAbsentIntervals',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSRestoreAbsentIntervals,
+        setOnWorker: ParameterCatalog._setLNSRestoreAbsentIntervals,
+    },
+    lnsrestoreintervallengths: {
+        name: 'LNSRestoreIntervalLengths',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSRestoreIntervalLengths,
+        setOnWorker: ParameterCatalog._setLNSRestoreIntervalLengths,
+    },
+    lnsrestoreintvarvalues: {
+        name: 'LNSRestoreIntVarValues',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSRestoreIntVarValues,
+        setOnWorker: ParameterCatalog._setLNSRestoreIntVarValues,
+    },
+    lnsusewarmstartonly: {
+        name: 'LNSUseWarmStartOnly',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog.setLNSUseWarmStartOnly,
+        setOnWorker: ParameterCatalog.setLNSUseWarmStartOnly,
     },
     lnsheuristicsepsilon: {
         name: 'LNSHeuristicsEpsilon',
@@ -4545,12 +4642,6 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setLNSNeighborhoodInitialQ,
         setOnWorker: ParameterCatalog._setLNSNeighborhoodInitialQ,
     },
-    lnsusewarmstartonly: {
-        name: 'LNSUseWarmStartOnly',
-        parse: ParseBool,
-        setGlobally: ParameterCatalog._setLNSUseWarmStartOnly,
-        setOnWorker: ParameterCatalog._setLNSUseWarmStartOnly,
-    },
     lnsdivinglimit: {
         name: 'LNSDivingLimit',
         parse: ParseNumber,
@@ -4574,6 +4665,30 @@ let parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setLNSStayOnObjective,
         setOnWorker: ParameterCatalog._setLNSStayOnObjective,
+    },
+    lnsfds: {
+        name: 'LNSFDS',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSFDS,
+        setOnWorker: ParameterCatalog._setLNSFDS,
+    },
+    lnsfreezeintervalsbeforefragment: {
+        name: 'LNSFreezeIntervalsBeforeFragment',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSFreezeIntervalsBeforeFragment,
+        setOnWorker: ParameterCatalog._setLNSFreezeIntervalsBeforeFragment,
+    },
+    lnsrelaxslack: {
+        name: 'LNSRelaxSlack',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSRelaxSlack,
+        setOnWorker: ParameterCatalog._setLNSRelaxSlack,
+    },
+    lnsportionmultiplier: {
+        name: 'LNSPortionMultiplier',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSPortionMultiplier,
+        setOnWorker: ParameterCatalog._setLNSPortionMultiplier,
     },
     simplelbworker: {
         name: 'SimpleLBWorker',
@@ -4712,6 +4827,30 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setSetTimesItvMappingStrategy,
         setOnWorker: ParameterCatalog._setSetTimesItvMappingStrategy,
     },
+    settimesinitdensity: {
+        name: 'SetTimesInitDensity',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setSetTimesInitDensity,
+        setOnWorker: ParameterCatalog._setSetTimesInitDensity,
+    },
+    settimesdensitylength: {
+        name: 'SetTimesDensityLength',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setSetTimesDensityLength,
+        setOnWorker: ParameterCatalog._setSetTimesDensityLength,
+    },
+    settimesdensityreliabilitythreshold: {
+        name: 'SetTimesDensityReliabilityThreshold',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setSetTimesDensityReliabilityThreshold,
+        setOnWorker: ParameterCatalog._setSetTimesDensityReliabilityThreshold,
+    },
+    settimesnbextendsfactor: {
+        name: 'SetTimesNbExtendsFactor',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setSetTimesNbExtendsFactor,
+        setOnWorker: ParameterCatalog._setSetTimesNbExtendsFactor,
+    },
     discretelowcapacitylimit: {
         name: 'DiscreteLowCapacityLimit',
         parse: ParseNumber,
@@ -4741,6 +4880,24 @@ let parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setUseReservoirPegging,
         setOnWorker: ParameterCatalog._setUseReservoirPegging,
+    },
+    usetimenet: {
+        name: 'UseTimeNet',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setUseTimeNet,
+        setOnWorker: ParameterCatalog._setUseTimeNet,
+    },
+    timenetvarstopreprocess: {
+        name: 'TimeNetVarsToPreprocess',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setTimeNetVarsToPreprocess,
+        setOnWorker: ParameterCatalog._setTimeNetVarsToPreprocess,
+    },
+    timenetsubprioritybits: {
+        name: 'TimeNetSubPriorityBits',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setTimeNetSubPriorityBits,
+        setOnWorker: ParameterCatalog._setTimeNetSubPriorityBits,
     },
 };
 /** @internal */
@@ -5317,20 +5474,17 @@ export class Model {
     /** @internal */
     _reusableBoolExpr(value) {
         let outParams = [GetBoolExpr(value)];
-        const result = new BoolExpr(this, "reusableBoolExpr", outParams);
-        return result;
+        return new BoolExpr(this, "reusableBoolExpr", outParams);
     }
     /** @internal */
     _reusableIntExpr(value) {
         let outParams = [GetIntExpr(value)];
-        const result = new IntExpr(this, "reusableIntExpr", outParams);
-        return result;
+        return new IntExpr(this, "reusableIntExpr", outParams);
     }
     /** @internal */
     _reusableFloatExpr(value) {
         let outParams = [GetFloatExpr(value)];
-        const result = new FloatExpr(this, "reusableFloatExpr", outParams);
-        return result;
+        return new FloatExpr(this, "reusableFloatExpr", outParams);
     }
     /**
     * Negation of the boolean expression `arg`.
@@ -5342,8 +5496,7 @@ export class Model {
     * Same as {@link BoolExpr.not | BoolExpr.not}. */
     not(arg) {
         let outParams = [GetBoolExpr(arg)];
-        const result = new BoolExpr(this, "boolNot", outParams);
-        return result;
+        return new BoolExpr(this, "boolNot", outParams);
     }
     /**
     * Logical _OR_ of boolean expressions `arg1` and `arg2`.
@@ -5355,8 +5508,7 @@ export class Model {
     * Same as {@link BoolExpr.or | BoolExpr.or}. */
     or(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolOr", outParams);
-        return result;
+        return new BoolExpr(this, "boolOr", outParams);
     }
     /**
     * Logical _AND_ of boolean expressions `arg1` and `arg2`.
@@ -5368,8 +5520,7 @@ export class Model {
     * Same as {@link BoolExpr.and | BoolExpr.and}. */
     and(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolAnd", outParams);
-        return result;
+        return new BoolExpr(this, "boolAnd", outParams);
     }
     /**
     * Logical implication of two boolean expressions, that is `arg1` implies `arg2`.
@@ -5381,26 +5532,22 @@ export class Model {
     * Same as {@link BoolExpr.implies | BoolExpr.implies}. */
     implies(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolImplies", outParams);
-        return result;
+        return new BoolExpr(this, "boolImplies", outParams);
     }
     /** @internal */
     _eq(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolEq", outParams);
-        return result;
+        return new BoolExpr(this, "boolEq", outParams);
     }
     /** @internal */
     _ne(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolNe", outParams);
-        return result;
+        return new BoolExpr(this, "boolNe", outParams);
     }
     /** @internal */
     _nand(arg1, arg2) {
         let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        const result = new BoolExpr(this, "boolNand", outParams);
-        return result;
+        return new BoolExpr(this, "boolNand", outParams);
     }
     /**
     * Creates an expression that replaces value _absent_ by a constant.
@@ -5418,8 +5565,7 @@ export class Model {
     * Same as {@link IntExpr.guard | IntExpr.guard}. */
     guard(arg, absentValue = 0) {
         let outParams = [GetIntExpr(arg), GetInt(absentValue)];
-        const result = new IntExpr(this, "intGuard", outParams);
-        return result;
+        return new IntExpr(this, "intGuard", outParams);
     }
     /**
     * Creates negation of the integer expression, i.e. `-arg`.
@@ -5431,8 +5577,7 @@ export class Model {
     * Same as {@link IntExpr.neg | IntExpr.neg}. */
     neg(arg) {
         let outParams = [GetIntExpr(arg)];
-        const result = new IntExpr(this, "intNeg", outParams);
-        return result;
+        return new IntExpr(this, "intNeg", outParams);
     }
     /**
     * Creates an addition of the two integer expressions, i.e. `arg1 + arg2`.
@@ -5444,8 +5589,7 @@ export class Model {
     * Same as {@link IntExpr.plus | IntExpr.plus}. */
     plus(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intPlus", outParams);
-        return result;
+        return new IntExpr(this, "intPlus", outParams);
     }
     /**
     * Creates a subtraction of the two integer expressions, i.e. `arg1 + arg2`.@remarks
@@ -5455,8 +5599,7 @@ export class Model {
     * Same as {@link IntExpr.minus | IntExpr.minus}. */
     minus(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intMinus", outParams);
-        return result;
+        return new IntExpr(this, "intMinus", outParams);
     }
     /**
     * Creates a multiplication of the two integer expressions, i.e. `arg1 * arg2`.
@@ -5468,8 +5611,7 @@ export class Model {
     * Same as {@link IntExpr.times | IntExpr.times}. */
     times(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intTimes", outParams);
-        return result;
+        return new IntExpr(this, "intTimes", outParams);
     }
     /**
     * Creates an integer division of the two integer expressions, i.e. `arg1 div arg2`. The division rounds towards zero.
@@ -5481,14 +5623,12 @@ export class Model {
     * Same as {@link IntExpr.div | IntExpr.div}. */
     div(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intDiv", outParams);
-        return result;
+        return new IntExpr(this, "intDiv", outParams);
     }
     /** @internal */
     _modulo(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "modulo", outParams);
-        return result;
+        return new IntExpr(this, "modulo", outParams);
     }
     /**
     * Constraints `arg1` and `arg2` to be identical, including their presence status.
@@ -5500,7 +5640,7 @@ export class Model {
     * Same as {@link IntExpr.identity | IntExpr.identity}. */
     identity(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new Constraint(this, "intIdentity", outParams);
+        new Constraint(this, "intIdentity", outParams);
     }
     /**
     * Creates Boolean expression `arg1` = `arg2`.
@@ -5514,8 +5654,7 @@ export class Model {
     * Same as {@link IntExpr.eq | IntExpr.eq}. */
     eq(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intEq", outParams);
-        return result;
+        return new BoolExpr(this, "intEq", outParams);
     }
     /**
     * Creates Boolean expression `arg1` &ne; `arg2`.
@@ -5529,8 +5668,7 @@ export class Model {
     * Same as {@link IntExpr.ne | IntExpr.ne}. */
     ne(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intNe", outParams);
-        return result;
+        return new BoolExpr(this, "intNe", outParams);
     }
     /**
     * Creates Boolean expression `arg1` < `arg2`.
@@ -5544,8 +5682,7 @@ export class Model {
     * Same as {@link IntExpr.lt | IntExpr.lt}. */
     lt(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intLt", outParams);
-        return result;
+        return new BoolExpr(this, "intLt", outParams);
     }
     /**
     * Creates Boolean expression `arg1` &le; `arg2`.
@@ -5559,8 +5696,7 @@ export class Model {
     * Same as {@link IntExpr.le | IntExpr.le}. */
     le(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intLe", outParams);
-        return result;
+        return new BoolExpr(this, "intLe", outParams);
     }
     /**
     * Creates Boolean expression `arg1` > `arg2`.
@@ -5574,8 +5710,7 @@ export class Model {
     * Same as {@link IntExpr.gt | IntExpr.gt}. */
     gt(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intGt", outParams);
-        return result;
+        return new BoolExpr(this, "intGt", outParams);
     }
     /**
     * Creates Boolean expression `arg1` &ge; `arg2`.
@@ -5588,8 +5723,7 @@ export class Model {
     * Same as {@link IntExpr.ge | IntExpr.ge}. */
     ge(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new BoolExpr(this, "intGe", outParams);
-        return result;
+        return new BoolExpr(this, "intGe", outParams);
     }
     /**
     * Creates Boolean expression `lb` &le; `arg` &le; `ub`.
@@ -5603,14 +5737,12 @@ export class Model {
     * Same as {@link IntExpr.inRange | IntExpr.inRange}. */
     inRange(arg, lb, ub) {
         let outParams = [GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new BoolExpr(this, "intInRange", outParams);
-        return result;
+        return new BoolExpr(this, "intInRange", outParams);
     }
     /** @internal */
     _notInRange(arg, lb, ub) {
         let outParams = [GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new BoolExpr(this, "intNotInRange", outParams);
-        return result;
+        return new BoolExpr(this, "intNotInRange", outParams);
     }
     /**
     * Creates an integer expression which is absolute value of `arg`.
@@ -5622,8 +5754,7 @@ export class Model {
     * Same as {@link IntExpr.abs | IntExpr.abs}. */
     abs(arg) {
         let outParams = [GetIntExpr(arg)];
-        const result = new IntExpr(this, "intAbs", outParams);
-        return result;
+        return new IntExpr(this, "intAbs", outParams);
     }
     /**
     * Creates an integer expression which is the minimum of `arg1` and `arg2`.
@@ -5635,8 +5766,7 @@ export class Model {
     * Same as {@link IntExpr.min2 | IntExpr.min2}. See {@link Model.min | Model.min} for n-ary minimum. */
     min2(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intMin2", outParams);
-        return result;
+        return new IntExpr(this, "intMin2", outParams);
     }
     /**
     * Creates an integer expression which is the maximum of `arg1` and `arg2`.
@@ -5648,14 +5778,12 @@ export class Model {
     * Same as {@link IntExpr.max2 | IntExpr.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
     max2(arg1, arg2) {
         let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        const result = new IntExpr(this, "intMax2", outParams);
-        return result;
+        return new IntExpr(this, "intMax2", outParams);
     }
     /** @internal */
     _square(arg) {
         let outParams = [GetIntExpr(arg)];
-        const result = new IntExpr(this, "intSquare", outParams);
-        return result;
+        return new IntExpr(this, "intSquare", outParams);
     }
     /**
     * Creates in integer expression for the sum of the arguments.
@@ -5698,8 +5826,7 @@ export class Model {
     *  */
     sum(args) {
         let outParams = [this._getIntExprArray(args)];
-        const result = new IntExpr(this, "intSum", outParams);
-        return result;
+        return new IntExpr(this, "intSum", outParams);
     }
     /**
     * Creates an integer expression for the maximum of the arguments.
@@ -5735,8 +5862,7 @@ export class Model {
     *  */
     max(args) {
         let outParams = [this._getIntExprArray(args)];
-        const result = new IntExpr(this, "intMax", outParams);
-        return result;
+        return new IntExpr(this, "intMax", outParams);
     }
     /**
     * Creates an integer expression for the minimum of the arguments.
@@ -5771,207 +5897,177 @@ export class Model {
     *  */
     min(args) {
         let outParams = [this._getIntExprArray(args)];
-        const result = new IntExpr(this, "intMin", outParams);
-        return result;
+        return new IntExpr(this, "intMin", outParams);
     }
     /** @internal */
     _intPresentLinearExpr(coefficients, expressions, constantTerm = 0) {
         let outParams = [this._getIntArray(coefficients), this._getIntExprArray(expressions), GetInt(constantTerm)];
-        const result = new IntExpr(this, "intPresentLinearExpr", outParams);
-        return result;
+        return new IntExpr(this, "intPresentLinearExpr", outParams);
     }
     /** @internal */
     _intOptionalLinearExpr(coefficients, expressions, constantTerm = 0) {
         let outParams = [this._getIntArray(coefficients), this._getIntExprArray(expressions), GetInt(constantTerm)];
-        const result = new IntExpr(this, "intOptionalLinearExpr", outParams);
-        return result;
+        return new IntExpr(this, "intOptionalLinearExpr", outParams);
     }
     /** @internal */
     _count(expressions, value) {
         let outParams = [this._getIntExprArray(expressions), GetInt(value)];
-        const result = new IntExpr(this, "intCount", outParams);
-        return result;
+        return new IntExpr(this, "intCount", outParams);
     }
     /** @internal */
     _element(array, subscript) {
         let outParams = [this._getIntArray(array), GetIntExpr(subscript)];
-        const result = new IntExpr(this, "intElement", outParams);
-        return result;
+        return new IntExpr(this, "intElement", outParams);
     }
     /** @internal */
     _exprElement(expressions, subscript) {
         let outParams = [this._getIntExprArray(expressions), GetIntExpr(subscript)];
-        const result = new IntExpr(this, "intExprElement", outParams);
-        return result;
+        return new IntExpr(this, "intExprElement", outParams);
     }
     /** @internal */
     _floatIdentity(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new Constraint(this, "floatIdentity", outParams);
+        new Constraint(this, "floatIdentity", outParams);
     }
     /** @internal */
     _floatGuard(arg, absentValue = 0) {
         let outParams = [GetFloatExpr(arg), GetFloat(absentValue)];
-        const result = new FloatExpr(this, "floatGuard", outParams);
-        return result;
+        return new FloatExpr(this, "floatGuard", outParams);
     }
     /** @internal */
     _floatNeg(arg) {
         let outParams = [GetFloatExpr(arg)];
-        const result = new FloatExpr(this, "floatNeg", outParams);
-        return result;
+        return new FloatExpr(this, "floatNeg", outParams);
     }
     /** @internal */
     _floatPlus(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatPlus", outParams);
-        return result;
+        return new FloatExpr(this, "floatPlus", outParams);
     }
     /** @internal */
     _floatMinus(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatMinus", outParams);
-        return result;
+        return new FloatExpr(this, "floatMinus", outParams);
     }
     /** @internal */
     _floatTimes(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatTimes", outParams);
-        return result;
+        return new FloatExpr(this, "floatTimes", outParams);
     }
     /** @internal */
     _floatDiv(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatDiv", outParams);
-        return result;
+        return new FloatExpr(this, "floatDiv", outParams);
     }
     /** @internal */
     _floatEq(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatEq", outParams);
-        return result;
+        return new BoolExpr(this, "floatEq", outParams);
     }
     /** @internal */
     _floatNe(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatNe", outParams);
-        return result;
+        return new BoolExpr(this, "floatNe", outParams);
     }
     /** @internal */
     _floatLt(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatLt", outParams);
-        return result;
+        return new BoolExpr(this, "floatLt", outParams);
     }
     /** @internal */
     _floatLe(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatLe", outParams);
-        return result;
+        return new BoolExpr(this, "floatLe", outParams);
     }
     /** @internal */
     _floatGt(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatGt", outParams);
-        return result;
+        return new BoolExpr(this, "floatGt", outParams);
     }
     /** @internal */
     _floatGe(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new BoolExpr(this, "floatGe", outParams);
-        return result;
+        return new BoolExpr(this, "floatGe", outParams);
     }
     /** @internal */
     _floatInRange(arg, lb, ub) {
         let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
-        const result = new BoolExpr(this, "floatInRange", outParams);
-        return result;
+        return new BoolExpr(this, "floatInRange", outParams);
     }
     /** @internal */
     _floatNotInRange(arg, lb, ub) {
         let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
-        const result = new BoolExpr(this, "floatNotInRange", outParams);
-        return result;
+        return new BoolExpr(this, "floatNotInRange", outParams);
     }
     /** @internal */
     _floatAbs(arg) {
         let outParams = [GetFloatExpr(arg)];
-        const result = new FloatExpr(this, "floatAbs", outParams);
-        return result;
+        return new FloatExpr(this, "floatAbs", outParams);
     }
     /** @internal */
     _floatSquare(arg) {
         let outParams = [GetFloatExpr(arg)];
-        const result = new FloatExpr(this, "floatSquare", outParams);
-        return result;
+        return new FloatExpr(this, "floatSquare", outParams);
     }
     /** @internal */
     _floatMin2(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatMin2", outParams);
-        return result;
+        return new FloatExpr(this, "floatMin2", outParams);
     }
     /** @internal */
     _floatMax2(arg1, arg2) {
         let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        const result = new FloatExpr(this, "floatMax2", outParams);
-        return result;
+        return new FloatExpr(this, "floatMax2", outParams);
     }
     /** @internal */
     _floatSum(args) {
         let outParams = [this._getFloatExprArray(args)];
-        const result = new FloatExpr(this, "floatSum", outParams);
-        return result;
+        return new FloatExpr(this, "floatSum", outParams);
     }
     /** @internal */
     _floatMax(args) {
         let outParams = [this._getFloatExprArray(args)];
-        const result = new FloatExpr(this, "floatMax", outParams);
-        return result;
+        return new FloatExpr(this, "floatMax", outParams);
     }
     /** @internal */
     _floatMin(args) {
         let outParams = [this._getFloatExprArray(args)];
-        const result = new FloatExpr(this, "floatMin", outParams);
-        return result;
+        return new FloatExpr(this, "floatMin", outParams);
     }
     /** @internal */
     _floatPresentLinearExpr(coefficients, expressions, constantTerm) {
         let outParams = [this._getFloatArray(coefficients), this._getFloatExprArray(expressions), GetFloat(constantTerm)];
-        const result = new FloatExpr(this, "floatPresentLinearExpr", outParams);
-        return result;
+        return new FloatExpr(this, "floatPresentLinearExpr", outParams);
     }
     /** @internal */
     _floatOptionalLinearExpr(coefficients, expressions, constantTerm) {
         let outParams = [this._getFloatArray(coefficients), this._getFloatExprArray(expressions), GetFloat(constantTerm)];
-        const result = new FloatExpr(this, "floatOptionalLinearExpr", outParams);
-        return result;
+        return new FloatExpr(this, "floatOptionalLinearExpr", outParams);
     }
     /** @internal */
     _floatElement(array, subscript) {
         let outParams = [this._getFloatArray(array), GetIntExpr(subscript)];
-        const result = new FloatExpr(this, "floatElement", outParams);
-        return result;
+        return new FloatExpr(this, "floatElement", outParams);
     }
     /** @internal */
     lexLe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        const result = new Constraint(this, "intLexLe", outParams);
+        new Constraint(this, "intLexLe", outParams);
     }
     /** @internal */
     lexLt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        const result = new Constraint(this, "intLexLt", outParams);
+        new Constraint(this, "intLexLt", outParams);
     }
     /** @internal */
     lexGe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        const result = new Constraint(this, "intLexGe", outParams);
+        new Constraint(this, "intLexGe", outParams);
     }
     /** @internal */
     lexGt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        const result = new Constraint(this, "intLexGt", outParams);
+        new Constraint(this, "intLexGt", outParams);
     }
     /**
     * Creates an integer expression for the start of an interval variable.
@@ -5999,8 +6095,7 @@ export class Model {
     *  */
     startOf(interval) {
         let outParams = [GetIntervalVar(interval)];
-        const result = new IntExpr(this, "startOf", outParams);
-        return result;
+        return new IntExpr(this, "startOf", outParams);
     }
     /**
     * Creates an integer expression for the end of an interval variable.
@@ -6028,8 +6123,7 @@ export class Model {
     *  */
     endOf(interval) {
         let outParams = [GetIntervalVar(interval)];
-        const result = new IntExpr(this, "endOf", outParams);
-        return result;
+        return new IntExpr(this, "endOf", outParams);
     }
     /**
     * Creates an integer expression for the length of an interval variable.
@@ -6057,8 +6151,7 @@ export class Model {
     *  */
     lengthOf(interval) {
         let outParams = [GetIntervalVar(interval)];
-        const result = new IntExpr(this, "lengthOf", outParams);
-        return result;
+        return new IntExpr(this, "lengthOf", outParams);
     }
     /**
     * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -6072,8 +6165,7 @@ export class Model {
     *  */
     startOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        const result = new IntExpr(this, "startOr", outParams);
-        return result;
+        return new IntExpr(this, "startOr", outParams);
     }
     /**
     * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -6087,8 +6179,7 @@ export class Model {
     *  */
     endOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        const result = new IntExpr(this, "endOr", outParams);
-        return result;
+        return new IntExpr(this, "endOr", outParams);
     }
     /**
     * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
@@ -6102,20 +6193,17 @@ export class Model {
     *  */
     lengthOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        const result = new IntExpr(this, "lengthOr", outParams);
-        return result;
+        return new IntExpr(this, "lengthOr", outParams);
     }
     /** @internal */
     _overlapLength(interval1, interval2) {
         let outParams = [GetIntervalVar(interval1), GetIntervalVar(interval2)];
-        const result = new IntExpr(this, "overlapLength", outParams);
-        return result;
+        return new IntExpr(this, "overlapLength", outParams);
     }
     /** @internal */
     _alternativeCost(main, options, weights) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options), this._getIntArray(weights)];
-        const result = new IntExpr(this, "intAlternativeCost", outParams);
-        return result;
+        return new IntExpr(this, "intAlternativeCost", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6139,8 +6227,7 @@ export class Model {
     *  */
     endBeforeEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "endBeforeEnd", outParams);
-        this.constraint(result);
+        new Constraint(this, "endBeforeEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6164,8 +6251,7 @@ export class Model {
     *  */
     endBeforeStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "endBeforeStart", outParams);
-        this.constraint(result);
+        new Constraint(this, "endBeforeStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6189,8 +6275,7 @@ export class Model {
     *  */
     startBeforeEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "startBeforeEnd", outParams);
-        this.constraint(result);
+        new Constraint(this, "startBeforeEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6214,8 +6299,7 @@ export class Model {
     *  */
     startBeforeStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "startBeforeStart", outParams);
-        this.constraint(result);
+        new Constraint(this, "startBeforeStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6239,8 +6323,7 @@ export class Model {
     *  */
     endAtEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "endAtEnd", outParams);
-        this.constraint(result);
+        new Constraint(this, "endAtEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6264,8 +6347,7 @@ export class Model {
     *  */
     endAtStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "endAtStart", outParams);
-        this.constraint(result);
+        new Constraint(this, "endAtStart", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6289,8 +6371,7 @@ export class Model {
     *  */
     startAtEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "startAtEnd", outParams);
-        this.constraint(result);
+        new Constraint(this, "startAtEnd", outParams);
     }
     /**
     * Creates a precedence constraint between two interval variables.
@@ -6314,8 +6395,7 @@ export class Model {
     *  */
     startAtStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        const result = new Constraint(this, "startAtStart", outParams);
-        this.constraint(result);
+        new Constraint(this, "startAtStart", outParams);
     }
     /**
     * Creates alternative constraint between interval variables.
@@ -6374,19 +6454,17 @@ export class Model {
     *  */
     alternative(main, options) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options)];
-        const result = new Constraint(this, "alternative", outParams);
+        new Constraint(this, "alternative", outParams);
     }
     /** @internal */
     intervalVarElement(slots, index, value) {
         let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
-        const result = new Constraint(this, "intervalVarElement", outParams);
-        this.constraint(result);
+        new Constraint(this, "intervalVarElement", outParams);
     }
     /** @internal */
     increasingIntervalVarElement(slots, index, value) {
         let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
-        const result = new Constraint(this, "increasingIntervalVarElement", outParams);
-        this.constraint(result);
+        new Constraint(this, "increasingIntervalVarElement", outParams);
     }
     /**
     *
@@ -6416,13 +6494,13 @@ export class Model {
     * the task `tasks[t]` is assigned to.  Only present tasks are assigned:
     * $$
     * \mathtt{
-    *   \forall t \in \mathrm{0,\dots,T-1:} \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
+    *   \forall t \in \mathrm{ \{0,\dots,T-1\} }: \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
     * }
     * $$
     * Each task is synchronized with the slot to which it is assigned:
     * $$
     * \begin{aligned}
-    * \mathtt{\forall t \in \mathrm{0,\dots,T-1} \text{ such that } tasks[t] \ne \text{absent:}} \\
+    * \mathtt{\forall t \in \mathrm{ \{0,\dots,T-1\} } \text{ such that } tasks[t] \ne \text{absent:}} \\
     *     \mathtt{slots[indices[t]]} &\ne \textrm{absent} \\
     *     \mathtt{startOf(tasks[t])} &= \mathtt{startOf(slots[indices[t]]) }\\
     *     \mathtt{endOf(tasks[t])} &= \mathtt{endOf(slots[indices[t]])}
@@ -6430,13 +6508,13 @@ export class Model {
     * $$
     * A slot is present if and only if there is a task assigned to it:
     * $$
-    * \forall \mathtt{s} \in 0,\dots,S-1:\;
+    * \forall \mathtt{s} \in \{0,\dots,S-1\}:\;
     * \mathtt{presenceOf(tasks[s])} \;\Leftrightarrow\; (\exists \mathtt{t} \in 0,\dots,T-1: \mathtt{indices[t]=s})
     * $$
     * Absent slots are positioned at the end of the array:
     * $$
     * \mathtt{
-    *    \forall s \in \mathrm{1,\dots,S-1}:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
+    *    \forall s \in \mathrm{ \{1,\dots,S-1\} }:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
     * }
     * $$
     * Present slots are sorted by both start and end:
@@ -6450,13 +6528,13 @@ export class Model {
     * $$
     *
     * The amount of the propagation for this constraint can be controlled by parameter
-    * {@link Parameters.packPropagationLevel}.
+    * {@link Parameters.itvMappingPropagationLevel}.
     *
     * @see {@link Model.pack} for limiting the amount of tasks assigned to a slot.
     *  */
     itvMapping(tasks, slots, indices) {
         let outParams = [this._getIntervalVarArray(tasks), this._getIntervalVarArray(slots), this._getIntExprArray(indices)];
-        const result = new Constraint(this, "itvMapping", outParams);
+        new Constraint(this, "itvMapping", outParams);
     }
     /**
     * Constraints an interval variable to span (cover) a set of other interval variables.
@@ -6506,14 +6584,14 @@ export class Model {
     *  */
     span(main, covered) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(covered)];
-        const result = new Constraint(this, "span", outParams);
+        new Constraint(this, "span", outParams);
     }
     /** @internal */
     _noOverlap(sequence, transitions) {
         let outParams = [GetSequenceVar(sequence)];
         if (transitions !== undefined)
             outParams.push(this._getIntMatrix(transitions));
-        const result = new Constraint(this, "noOverlap", outParams);
+        new Constraint(this, "noOverlap", outParams);
     }
     /**
     * Creates an expression equal to the position of the `interval` on the `sequence`.
@@ -6530,18 +6608,17 @@ export class Model {
     *  */
     position(interval, sequence) {
         let outParams = [GetIntervalVar(interval), GetSequenceVar(sequence)];
-        const result = new IntExpr(this, "position", outParams);
-        return result;
+        return new IntExpr(this, "position", outParams);
     }
     /** @internal */
     _sameSequence(sequence1, sequence2) {
         let outParams = [GetSequenceVar(sequence1), GetSequenceVar(sequence2)];
-        const result = new Constraint(this, "sameSequence", outParams);
+        new Constraint(this, "sameSequence", outParams);
     }
     /** @internal */
     _sameSequenceGroup(sequences) {
         let outParams = [this._getSequenceVarArray(sequences)];
-        const result = new Constraint(this, "sameSequenceGroup", outParams);
+        new Constraint(this, "sameSequenceGroup", outParams);
     }
     /**
     *
@@ -6648,8 +6725,7 @@ export class Model {
     *  */
     pulse(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        const result = new CumulExpr(this, "pulse", outParams);
-        return result;
+        return new CumulExpr(this, "pulse", outParams);
     }
     /**
     *
@@ -6734,8 +6810,7 @@ export class Model {
     *  */
     stepAtStart(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        const result = new CumulExpr(this, "stepAtStart", outParams);
-        return result;
+        return new CumulExpr(this, "stepAtStart", outParams);
     }
     /**
     *
@@ -6820,8 +6895,7 @@ export class Model {
     *  */
     stepAtEnd(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        const result = new CumulExpr(this, "stepAtEnd", outParams);
-        return result;
+        return new CumulExpr(this, "stepAtEnd", outParams);
     }
     /**
     * Creates cumulative function (expression) that changes value at `x` by the given `height`. The height can be positive or negative, and it can be given by a constant or an expression (for example, by {@link Model.intVar}).
@@ -6842,8 +6916,7 @@ export class Model {
     *  */
     stepAt(x, height) {
         let outParams = [GetInt(x), GetIntExpr(height)];
-        const result = new CumulExpr(this, "stepAt", outParams);
-        return result;
+        return new CumulExpr(this, "stepAt", outParams);
     }
     /**
     * Addition of two cumulative expressions.
@@ -6863,8 +6936,7 @@ export class Model {
     *  */
     cumulPlus(lhs, rhs) {
         let outParams = [GetCumulExpr(lhs), GetCumulExpr(rhs)];
-        const result = new CumulExpr(this, "cumulPlus", outParams);
-        return result;
+        return new CumulExpr(this, "cumulPlus", outParams);
     }
     /**
     * Subtraction of two cumulative expressions.
@@ -6884,8 +6956,7 @@ export class Model {
     *  */
     cumulMinus(lhs, rhs) {
         let outParams = [GetCumulExpr(lhs), GetCumulExpr(rhs)];
-        const result = new CumulExpr(this, "cumulMinus", outParams);
-        return result;
+        return new CumulExpr(this, "cumulMinus", outParams);
     }
     /**
     * Negation of a cumulative expression.
@@ -6899,8 +6970,7 @@ export class Model {
     *  */
     cumulNeg(arg) {
         let outParams = [GetCumulExpr(arg)];
-        const result = new CumulExpr(this, "cumulNeg", outParams);
-        return result;
+        return new CumulExpr(this, "cumulNeg", outParams);
     }
     /**
     * Sum of cumulative expressions.
@@ -6913,8 +6983,7 @@ export class Model {
     *  */
     cumulSum(array) {
         let outParams = [this._getCumulExprArray(array)];
-        const result = new CumulExpr(this, "cumulSum", outParams);
-        return result;
+        return new CumulExpr(this, "cumulSum", outParams);
     }
     /**
     * Constrains cumulative function `cumul` to be everywhere less or equal to `maxCapacity`.
@@ -6929,7 +6998,7 @@ export class Model {
     *  */
     cumulLe(cumul, maxCapacity) {
         let outParams = [GetCumulExpr(cumul), GetInt(maxCapacity)];
-        const result = new Constraint(this, "cumulLe", outParams);
+        new Constraint(this, "cumulLe", outParams);
     }
     /**
     * Constrains cumulative function `cumul` to be everywhere greater or equal to `minCapacity`.
@@ -6944,35 +7013,32 @@ export class Model {
     *  */
     cumulGe(cumul, minCapacity) {
         let outParams = [GetCumulExpr(cumul), GetInt(minCapacity)];
-        const result = new Constraint(this, "cumulGe", outParams);
+        new Constraint(this, "cumulGe", outParams);
     }
     /** @internal */
     _cumulMaxProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
-        const result = new Constraint(this, "cumulMaxProfile", outParams);
+        new Constraint(this, "cumulMaxProfile", outParams);
     }
     /** @internal */
     _cumulMinProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
-        const result = new Constraint(this, "cumulMinProfile", outParams);
+        new Constraint(this, "cumulMinProfile", outParams);
     }
     /** @internal */
     _cumulStairs(atoms) {
         let outParams = [this._getCumulExprArray(atoms)];
-        const result = new CumulExpr(this, "cumulStairs", outParams);
-        return result;
+        return new CumulExpr(this, "cumulStairs", outParams);
     }
     /** @internal */
     _precedenceEnergyBefore(main, others, heights, capacity) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(others), this._getIntArray(heights), GetInt(capacity)];
-        const result = new Constraint(this, "precedenceEnergyBefore", outParams);
-        this.constraint(result);
+        new Constraint(this, "precedenceEnergyBefore", outParams);
     }
     /** @internal */
     _precedenceEnergyAfter(main, others, heights, capacity) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(others), this._getIntArray(heights), GetInt(capacity)];
-        const result = new Constraint(this, "precedenceEnergyAfter", outParams);
-        this.constraint(result);
+        new Constraint(this, "precedenceEnergyAfter", outParams);
     }
     /**
     * Computes sum of values of the step function `func` over the interval `interval`.
@@ -6987,13 +7053,12 @@ export class Model {
     *  */
     stepFunctionSum(func, interval) {
         let outParams = [GetIntStepFunction(func), GetIntervalVar(interval)];
-        const result = new IntExpr(this, "intStepFunctionSum", outParams);
-        return result;
+        return new IntExpr(this, "intStepFunctionSum", outParams);
     }
     /** @internal */
     _stepFunctionSumInRange(func, interval, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this, "intStepFunctionSumInRange", outParams);
+        new Constraint(this, "intStepFunctionSumInRange", outParams);
     }
     /**
     * Evaluates a step function at a given point.
@@ -7009,18 +7074,17 @@ export class Model {
     *  */
     stepFunctionEval(func, arg) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg)];
-        const result = new IntExpr(this, "intStepFunctionEval", outParams);
-        return result;
+        return new IntExpr(this, "intStepFunctionEval", outParams);
     }
     /** @internal */
     _stepFunctionEvalInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this, "intStepFunctionEvalInRange", outParams);
+        new Constraint(this, "intStepFunctionEvalInRange", outParams);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        const result = new Constraint(this, "intStepFunctionEvalNotInRange", outParams);
+        new Constraint(this, "intStepFunctionEvalNotInRange", outParams);
     }
     /**
     * Forbid the interval variable to overlap with segments of the function where the value is zero.
@@ -7035,7 +7099,7 @@ export class Model {
     *  */
     forbidExtent(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        const result = new Constraint(this, "forbidExtent", outParams);
+        new Constraint(this, "forbidExtent", outParams);
     }
     /**
     * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
@@ -7056,7 +7120,7 @@ export class Model {
     *  */
     forbidStart(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        const result = new Constraint(this, "forbidStart", outParams);
+        new Constraint(this, "forbidStart", outParams);
     }
     /**
     * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
@@ -7077,149 +7141,142 @@ export class Model {
     *  */
     forbidEnd(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        const result = new Constraint(this, "forbidEnd", outParams);
+        new Constraint(this, "forbidEnd", outParams);
     }
     /** @internal */
     _disjunctiveIsBefore(x, y) {
         let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
-        const result = new BoolExpr(this, "disjunctiveIsBefore", outParams);
-        return result;
+        return new BoolExpr(this, "disjunctiveIsBefore", outParams);
     }
     /** @internal */
     _itvPresenceChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        const result = new Constraint(this, "itvPresenceChain", outParams);
+        new Constraint(this, "itvPresenceChain", outParams);
     }
     /** @internal */
     _itvPresenceChainWithCount(intervals, count) {
         let outParams = [this._getIntervalVarArray(intervals), GetIntExpr(count)];
-        const result = new Constraint(this, "itvPresenceChainWithCount", outParams);
+        new Constraint(this, "itvPresenceChainWithCount", outParams);
     }
     /** @internal */
     _endBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        const result = new Constraint(this, "endBeforeStartChain", outParams);
+        new Constraint(this, "endBeforeStartChain", outParams);
     }
     /** @internal */
     _startBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        const result = new Constraint(this, "startBeforeStartChain", outParams);
+        new Constraint(this, "startBeforeStartChain", outParams);
     }
     /** @internal */
     _endBeforeEndChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        const result = new Constraint(this, "endBeforeEndChain", outParams);
+        new Constraint(this, "endBeforeEndChain", outParams);
     }
     /** @internal */
     _decisionPresentIntVar(variable, isLeft) {
         let outParams = [GetIntExpr(variable), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentIntVar", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentIntVar", outParams);
     }
     /** @internal */
     _decisionAbsentIntVar(variable, isLeft) {
         let outParams = [GetIntExpr(variable), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionAbsentIntVar", outParams);
-        return result;
+        return new SearchDecision(this, "decisionAbsentIntVar", outParams);
     }
     /** @internal */
     _decisionPresentIntervalVar(variable, isLeft) {
         let outParams = [GetIntervalVar(variable), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentIntervalVar", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentIntervalVar", outParams);
     }
     /** @internal */
     _decisionAbsentIntervalVar(variable, isLeft) {
         let outParams = [GetIntervalVar(variable), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionAbsentIntervalVar", outParams);
-        return result;
+        return new SearchDecision(this, "decisionAbsentIntervalVar", outParams);
     }
     /** @internal */
     _decisionPresentLE(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentLE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentLE", outParams);
     }
     /** @internal */
     _decisionOptionalGT(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalGT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalGT", outParams);
     }
     /** @internal */
     _decisionPresentGE(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentGE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentGE", outParams);
     }
     /** @internal */
     _decisionOptionalLT(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalLT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalLT", outParams);
     }
     /** @internal */
     _decisionPresentStartLE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentStartLE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentStartLE", outParams);
     }
     /** @internal */
     _decisionOptionalStartGT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalStartGT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalStartGT", outParams);
     }
     /** @internal */
     _decisionPresentStartGE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentStartGE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentStartGE", outParams);
     }
     /** @internal */
     _decisionOptionalStartLT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalStartLT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalStartLT", outParams);
     }
     /** @internal */
     _decisionPresentEndLE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentEndLE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentEndLE", outParams);
     }
     /** @internal */
     _decisionOptionalEndGT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalEndGT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalEndGT", outParams);
     }
     /** @internal */
     _decisionPresentEndGE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionPresentEndGE", outParams);
-        return result;
+        return new SearchDecision(this, "decisionPresentEndGE", outParams);
     }
     /** @internal */
     _decisionOptionalEndLT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        const result = new SearchDecision(this, "decisionOptionalEndLT", outParams);
-        return result;
+        return new SearchDecision(this, "decisionOptionalEndLT", outParams);
+    }
+    /** @internal */
+    _decisionPresentLengthLE(variable, bound, isLeft) {
+        let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
+        return new SearchDecision(this, "decisionPresentLengthLE", outParams);
+    }
+    /** @internal */
+    _decisionOptionalLengthGT(variable, bound, isLeft) {
+        let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
+        return new SearchDecision(this, "decisionOptionalLengthGT", outParams);
     }
     /** @internal */
     _noGood(decisions) {
         let outParams = [this._getSearchDecisionArray(decisions)];
-        const result = new Constraint(this, "noGood", outParams);
+        new Constraint(this, "noGood", outParams);
     }
     /** @internal */
     _related(x, y) {
         let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
-        const result = new Blank(this, "related", outParams);
+        return new Directive(this, "related", outParams);
     }
     /** @internal */
     pack(load, where, sizes) {
         let outParams = [this._getIntExprArray(load), this._getIntExprArray(where), this._getIntArray(sizes)];
-        const result = new Constraint(this, "pack", outParams);
+        new Constraint(this, "pack", outParams);
     }
     noOverlap(seq, transitions) {
         if (Array.isArray(seq))
@@ -7244,8 +7301,8 @@ export class Model {
         this.#model.push(GetConstraint(constraint));
     }
     /** @internal */
-    _addBlank(blank) {
-        this.#model.push(blank._getArg());
+    _addDirective(directive) {
+        this.#model.push(directive._getArg());
     }
     /** @internal */
     boolConst(value) {
@@ -7851,7 +7908,9 @@ export class Model {
     getBoolVars() {
         return [...this.#boolVars];
     }
-    /** @internal */
+    /**
+     * Returns an array of all interval variables in the model.
+     */
     getIntVars() {
         return [...this.#intVars];
     }
