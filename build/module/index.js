@@ -15,7 +15,6 @@
  */
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
-import { EventEmitter, once } from 'node:events';
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 // The following typedoc comment is for constant Version that is added by generate_ts:
@@ -23,49 +22,109 @@ import * as fs from 'node:fs';
  * The version of the module, such as "1.0.0".
  * @group Constants
  */
-export const Version = "2025.11.0";
+export const Version = "2025.12.1";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
 // === External interfaces ===================================================
 /**
+ * @remarks
  * Maximum value of a decision variable or a decision expression (such as `x+1` where `x` is a variable).
+ *
+ * Arithmetic expressions must stay within the range [{@link IntVarMin}, {@link IntVarMax}]. If an expression exceeds this range for all possible variable assignments, the model becomes infeasible.
  *
  * @example
  *
- * The following model is infeasible:
+ * The following model is infeasible because `x*x` exceeds `IntVarMax` for all values in the variable's domain:
+ *
  * ```ts
  * let model = new CP.Model();
- * let x = model.intVar({range: [10000000, 2000000]});
+ * let x = model.intVar({range: [10000000, 20000000]});
  * // Constraint x*x >= 1:
- * model.constraint(x.times(x).ge(1));
- * let result = await CP.solve(model);
+ * model.enforce(x.times(x).ge(1));
+ * let result = await model.solve();
  * ```
- * Because for any value of `x`, the expression `x*x` is greater than `IntVarMax` and thus cannot be computed.
+ *
+ * For any value of `x` in the range [10000000, 20000000], the expression `x*x` exceeds {@link IntVarMax} and cannot be computed, making the model infeasible.
  *
  * @group Constants
  */
 export const IntVarMax = 1073741823;
 /**
+ * @remarks
  * Minimum value of a decision variable or a decision expression (such as `x+1` where `x` is a variable).
  * The opposite of {@link IntVarMax}.
+ *
+ * Use `IntVarMin` when you need to allow the full range of negative values for an integer variable.
+ *
+ * @example
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * // IntVarMin is the minimum allowed value for integer variables
+ * const x = model.intVar({ min: CP.IntVarMin, max: 0, name: "x" });
+ * ```
+ *
  * @group Constants
  */
 export const IntVarMin = -IntVarMax;
 /**
+ * @remarks
  * Maximum value of start or end of an interval variable. The opposite of {@link IntervalMin}.
+ *
+ * Use `IntervalMax` when you want to leave the end time of an interval variable unconstrained.
+ *
+ * @example
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * // IntervalMax is the maximum allowed value for interval start/end
+ * const task = model.intervalVar({ end: [0, CP.IntervalMax], length: 10, name: "task" });
+ * ```
+ *
  * @group Constants
  */
 export const IntervalMax = 715827882;
 /**
+ * @remarks
  * Minimum value of start or end of an interval variable. The opposite of {@link IntervalMax}.
+ *
+ * Use `IntervalMin` when you want to leave the start time of an interval variable unconstrained.
+ *
+ * @example
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * // IntervalMin is the minimum allowed value for interval start/end
+ * const task = model.intervalVar({ start: [CP.IntervalMin, 0], length: 10, name: "task" });
+ * ```
+ *
  * @group Constants
  */
 export const IntervalMin = -715827882;
 /**
+ * @remarks
  * Maximum length of an interval variable. The maximum length can be achieved by
- * an interval that starts at {@link IntervalMin} and ends at {@link
- * IntervalMax}.
+ * an interval that starts at {@link IntervalMin} and ends at {@link IntervalMax}.
+ *
+ * Use `LengthMax` when you want to leave the length of an interval variable unconstrained.
+ *
+ * @example
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * // LengthMax is the maximum allowed length for an interval variable
+ * const task = model.intervalVar({ length: [0, CP.LengthMax], name: "task" });
+ * ```
+ *
  * @group Constants
  */
 export const LengthMax = IntervalMax - IntervalMin;
@@ -73,273 +132,470 @@ export const LengthMax = IntervalMax - IntervalMin;
 export const FloatVarMax = Number.MAX_VALUE;
 /** @internal */
 export const FloatVarMin = -FloatVarMax;
+// Node.js implementation of SolverConnection using subprocess + readline.
+// Handles transport-level concerns only. Application-level protocol handling
+// (e.g., detecting unexpected close) is done by the Solver class.
+class NodeSolverConnection {
+    #solver;
+    #rl;
+    #handlers;
+    #stderrBuffer = "";
+    #closed = false;
+    #rlClosed = false;
+    #solverClosed = false;
+    constructor(solverPath, solverArgs, handlers) {
+        this.#handlers = handlers;
+        this.#solver = spawn(solverPath, solverArgs, { windowsHide: true });
+        // Channel error messages to the user (e.g., fails to spawn the process)
+        this.#solver.on('error', (err) => {
+            err.message = "Error with solver subprocess: " + err.message;
+            this.#emitError(err);
+        });
+        // Handle process close. Note: code 0 close may still be "unexpected" at protocol
+        // level - that's handled by Solver class via onClose callback.
+        this.#solver.on('close', (code, signal) => {
+            this.#solverClosed = true;
+            if (code !== 0 && code !== null)
+                this.#emitError(new Error('Solver process ended with code ' + code));
+            else if (signal !== null)
+                this.#emitError(new Error('Solver process ended by signal ' + signal));
+            this.#checkFullyClosed();
+        });
+        // Handle stdin errors. Ignore EPIPE since writes are buffered and it can happen
+        // when user calls sendSolution and the solver terminates in the middle of the message.
+        this.#solver.stdin.on('error', (err) => {
+            if (err.message === "write EPIPE")
+                return;
+            err.message = "Error at solver stdin: " + err.message;
+            this.#emitError(err);
+        });
+        this.#solver.stdout.on('error', (err) => {
+            err.message = "Error at solver stdout: " + err.message;
+            this.#emitError(err);
+        });
+        // Messages on stderr typically arrive in multiple chunks. Buffer until we have
+        // complete lines, then emit as warnings. The part after the last newline stays
+        // buffered for the next chunk.
+        this.#solver.stderr.on('data', (data) => {
+            this.#stderrBuffer += data.toString();
+            const lastNewline = this.#stderrBuffer.lastIndexOf('\n');
+            if (lastNewline >= 0) {
+                const completeMessage = this.#stderrBuffer.substring(0, lastNewline);
+                this.#stderrBuffer = this.#stderrBuffer.substring(lastNewline + 1);
+                // Prefix every line
+                const prefixed = completeMessage.split('\n').map(line => "Solver stderr: " + line).join('\n');
+                this.#handlers.onWarning(prefixed);
+            }
+        });
+        // Create readline interface on solver stdout so that we can easily read its
+        // output line by line. Every line should be a separate JSON message.
+        this.#rl = readline.createInterface({
+            input: this.#solver.stdout,
+            crlfDelay: Infinity
+        });
+        this.#rl.on('close', () => {
+            this.#rlClosed = true;
+            this.#checkFullyClosed();
+        });
+        this.#rl.on('line', (line) => {
+            this.#handlers.onMessage(line);
+        });
+    }
+    #emitError(err) {
+        if (this.#closed)
+            return;
+        this.#handlers.onError(err);
+    }
+    // Called when both readline and solver process are closed
+    #checkFullyClosed() {
+        if (this.#rlClosed && this.#solverClosed && !this.#closed) {
+            this.#closed = true;
+            this.#handlers.onClose();
+        }
+    }
+    send(data) {
+        if (!this.#closed && this.#solver.stdin.writable)
+            this.#solver.stdin.write(data + '\n');
+    }
+    close() {
+        if (!this.#closed)
+            this.#solver.kill();
+    }
+}
+// WebSocket implementation of SolverConnection.
+// Shared code - works in both Node.js 22+ (native WebSocket) and browsers.
+// Handles line buffering since WebSocket messages may span multiple lines
+// or contain partial lines.
+class WebSocketSolverConnection {
+    #ws;
+    #handlers;
+    #buffer = "";
+    #closed = false;
+    #pendingSend;
+    constructor(serverUrl, handlers) {
+        this.#handlers = handlers;
+        this.#ws = new WebSocket(serverUrl);
+        this.#ws.onopen = () => {
+            // Send any data that was queued before connection opened
+            if (this.#pendingSend !== undefined) {
+                this.#ws.send(this.#pendingSend);
+                this.#pendingSend = undefined;
+            }
+        };
+        this.#ws.onmessage = (event) => {
+            // Buffer incoming data and emit complete lines
+            const data = typeof event.data === 'string' ? event.data : event.data.toString();
+            this.#buffer += data;
+            // Process complete lines
+            let newlineIndex;
+            while ((newlineIndex = this.#buffer.indexOf('\n')) >= 0) {
+                const line = this.#buffer.substring(0, newlineIndex);
+                this.#buffer = this.#buffer.substring(newlineIndex + 1);
+                if (line.length > 0)
+                    this.#handlers.onMessage(line);
+            }
+        };
+        this.#ws.onclose = (event) => {
+            if (this.#closed)
+                return;
+            this.#closed = true;
+            // Emit any remaining buffered data as final line
+            if (this.#buffer.length > 0) {
+                this.#handlers.onMessage(this.#buffer);
+                this.#buffer = "";
+            }
+            // Non-normal close is an error (code 1000 = normal closure)
+            if (event.code !== 1000 && event.code !== 1005) {
+                // 1005 = "No Status Rcvd" - normal for some servers
+                const reason = event.reason || `WebSocket closed with code ${event.code}`;
+                this.#handlers.onError(new Error(reason));
+            }
+            this.#handlers.onClose();
+        };
+        this.#ws.onerror = (event) => {
+            // Node.js native WebSocket doesn't call onclose after onerror for connection failures.
+            // We need to handle the error here and close the connection ourselves.
+            if (this.#closed)
+                return;
+            this.#closed = true;
+            // Extract error message if available (browser vs Node.js have different event types)
+            let errorMessage = 'WebSocket connection failed';
+            if ('message' in event && typeof event.message === 'string')
+                errorMessage = event.message;
+            this.#handlers.onError(new Error(errorMessage));
+            this.#handlers.onClose();
+        };
+    }
+    send(data) {
+        if (this.#closed)
+            return;
+        const message = data + '\n';
+        if (this.#ws.readyState === WebSocket.CONNECTING) {
+            // Queue for sending after connection opens
+            this.#pendingSend = (this.#pendingSend ?? "") + message;
+        }
+        else if (this.#ws.readyState === WebSocket.OPEN) {
+            this.#ws.send(message);
+        }
+        // If CLOSING or CLOSED, silently drop (consistent with NodeSolverConnection behavior)
+    }
+    close() {
+        if (!this.#closed) {
+            this.#closed = true;
+            this.#ws.close();
+        }
+    }
+}
 // === Model nodes ===========================================================
 /**
+ * @remarks
  * The base class for all modeling objects.
  *
  * @example
- *
  * ```ts
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x" });
- * let xStart = model.startOf(x);
- * let result = await CP.solve(model);
+ * let start = model.start(x);
+ * let result = await model.solve();
  * ```
- * Interval variable `x` and expression `xStart` are both instances of {@link ModelNode}.
+ *
+ * Interval variable `x` and expression `start` are both instances of {@link ModelElement}.
  * There are specialized descendant classes such as {@link IntervalVar} and {@link IntExpr}.
  *
- * Any modeling object can be assigned a name, see {@link ModelNode#setName} and {@link ModelNode#getName}.
+ * Any modeling object can be assigned a name, see {@link ModelElement.setName} and {@link ModelElement.getName}.
  *
  * @group Modeling
  */
-export class ModelNode {
+export class ModelElement {
+    // Factory pattern using Object.create() to avoid V8 deoptimization.
+    // Using `new` would call constructors with different `this` maps from different
+    // subclass hierarchies, causing "wrong map" deopts. Object.create() sets up
+    // the prototype chain (so instanceof works) without calling any constructors.
     _props;
     _cp;
     // This is how this node is referred when it is used in an expression.
     // There are two ways:
     //  * { arg: this._props } when it is used only once
     //  * { ref: 12345 } when it is used multiple times
-    // The idea is that #arg mutates from the first version to the second version
+    // The idea is that _arg mutates from the first version to the second version
     // when it is used for the second time.
-    // When unused, #arg is undefined.
-    #arg;
-    constructor(cp, arg1, arg2) {
-        this._cp = cp;
-        if (typeof arg2 !== "number")
-            this._props = { func: arg1, args: arg2 };
-        else {
-            this._props = arg1;
-            this.#arg = { ref: arg2 };
-        }
-    }
-    // setName returns polymorphic `this `type so that it doesn't have to be
-    // redefined in descendant classes. TypeScript understands.
-    /** Assigns a name to the node.
-     *
-     * @param name Named to be assigned.
-     * @returns The node itself so it can be used in chained expression.
+    // V8-friendly: always same shape, mutate in place, never use delete operator.
+    // JSON.stringify omits undefined values, so serialization is unchanged.
+    _arg;
+    /**
+     * The name assigned to this model element.
      *
      * @remarks
+     * The name is optional and primarily useful for debugging purposes. When set,
+     * it helps identify the element in solver logs, error messages, and when
+     * inspecting solutions.
      *
-     * Assigning a name is optional. However, it is helpful for debugging because
-     * variable names appear in the development traces. It is also helpful for
-     * exporting the model to a file (see {@link problem2json}).
+     * Names can be assigned to any model element including variables, expressions,
+     * and constraints.
      *
      * @example
      *
      * ```ts
-     * let model = new CP.Model();
-     * let x = model.intervalVar({ length: 10 }).setName("x");
-     * // The line above is equivalent to:
-     * //   let x = model.intervalVar({ length: 10, name:"x" });
-     * let endOfX = model.endOf(x).setName("endOfX");
-     * let result = await CP.solve(model);
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // Name a variable at creation
+     * const task = model.intervalVar({ length: 10, name: "assembly" });
+     *
+     * // Or set name later
+     * const x = model.intVar({ min: 0, max: 100 });
+     * x.name = "quantity";
+     *
+     * console.log(task.name);  // "assembly"
+     * console.log(x.name);     // "quantity"
      * ```
      */
-    setName(name) {
-        this._props.name = name;
-        return this;
-    }
-    /** Returns the name assigned to the node. */
+    get name() { return this._props.name; }
+    set name(value) { this._props.name = value; }
+    /** @deprecated Use `name` property instead */
+    setName(name) { this._props.name = name; }
+    /** @deprecated Use `name` property instead */
     getName() { return this._props.name; }
     /** @internal */
     _getProps() { return this._props; }
     // Get (and create or mutate) #arg:
     /** @internal */
     _getArg() {
-        if (this.#arg === undefined) {
-            // The first time someone uses this node in an expression
-            this.#arg = { arg: this._props };
+        if (this._arg.ref !== undefined)
+            return this._arg;
+        if (this._arg.arg !== undefined) {
+            // Second use: upgrade to ref, mutate in place
+            this._arg.ref = this._cp._getNewRefId(this._props);
+            this._arg.arg = undefined; // Set to undefined, don't delete!
+            return this._arg;
         }
-        else if (this.#arg.ref === undefined) {
-            // The second time the node is used as an argument. Create a ref.
-            this.#arg.ref = this._cp._getNewRefId(this._props);
-            delete this.#arg.arg;
-        }
-        return this.#arg;
-    }
-    // For variables that must always have an ID:
-    /** @internal */
-    _forceRef() {
-        this.#arg = { ref: this._cp._getNewRefId(this._props) };
+        // First use: inline props
+        this._arg.arg = this._props;
+        return this._arg;
     }
     /** @internal */
     _getId() {
-        return this.#arg.ref;
+        return this._arg.ref;
     }
 }
 /**
  * @internal
  */
-class Directive extends ModelNode {
-    #isDirectiveNode;
+class Directive extends ModelElement {
     /** @internal */
-    constructor(cp, func, args) {
-        super(cp, func, args);
-        cp._addDirective(this);
+    static _Create(cp, func, args) {
+        // Avoid calling constructor chain to prevent V8 deoptimization:
+        const instance = Object.create(Directive.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        cp._addDirective(instance);
+        return instance;
     }
 }
 /**
  * @internal
  */
-class ArrayNode extends ModelNode {
-    #isNodeArray;
+class ArrayNode extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(ArrayNode.prototype);
+        instance._cp = cp;
+        instance._props = { func, args: Array.isArray(args) ? args : [args] };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
 }
 /**
  * @internal
  */
-class Constraint extends ModelNode {
-    // Void field actually does not exist on runtime; however, it makes the types
-    // different so that we cannot pass Constraint to a function that expects
-    // BoolExprArg.
-    #isConstraint;
+export class Constraint extends ModelElement {
     /** @internal */
-    constructor(cp, func, args) {
-        super(cp, func, args);
-        cp.constraint(this);
+    static _Create(cp, func, args) {
+        const instance = Object.create(Constraint.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        cp._addConstraint(instance);
+        return instance;
     }
 }
 // If we don't document FloatExpr, then it is not visible that IntExpr derives
-// from ModelNode.
+// from ModelElement.
 /**
+ * @remarks
  * A class representing floating-point expression in the model.
  * Currently, there is no way to create floating-point expressions.
  * The class is only a base class for {@link IntExpr}.
+ *
  * @group Modeling
  */
-export class FloatExpr extends ModelNode {
-    #isFloatExpr;
+export class FloatExpr extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(FloatExpr.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
     /** @internal */
     _reusableFloatExpr() {
         let outParams = [this._getArg()];
-        return new FloatExpr(this._cp, "reusableFloatExpr", outParams);
+        return FloatExpr._Create(this._cp, "reusableFloatExpr", outParams);
     }
     /** @internal */
-    _floatIdentity(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        new Constraint(this._cp, "floatIdentity", outParams);
+    _floatIdentity(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return Constraint._Create(this._cp, "floatIdentity", outParams);
     }
     /** @internal */
     _floatGuard(absentValue = 0) {
         let outParams = [this._getArg(), GetFloat(absentValue)];
-        return new FloatExpr(this._cp, "floatGuard", outParams);
+        return FloatExpr._Create(this._cp, "floatGuard", outParams);
     }
     /** @internal */
     neg() {
         let outParams = [this._getArg()];
-        return new FloatExpr(this._cp, "floatNeg", outParams);
+        return FloatExpr._Create(this._cp, "floatNeg", outParams);
     }
     /** @internal */
-    _floatPlus(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatPlus", outParams);
+    _floatPlus(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatPlus", outParams);
     }
     /** @internal */
-    _floatMinus(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatMinus", outParams);
+    _floatMinus(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatMinus", outParams);
     }
     /** @internal */
-    _floatTimes(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatTimes", outParams);
+    _floatTimes(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatTimes", outParams);
     }
     /** @internal */
-    _floatDiv(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatDiv", outParams);
+    _floatDiv(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatDiv", outParams);
     }
     /** @internal */
-    _floatEq(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatEq", outParams);
+    _floatEq(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatEq", outParams);
     }
     /** @internal */
-    _floatNe(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatNe", outParams);
+    _floatNe(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatNe", outParams);
     }
     /** @internal */
-    _floatLt(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatLt", outParams);
+    _floatLt(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatLt", outParams);
     }
     /** @internal */
-    _floatLe(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatLe", outParams);
+    _floatLe(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatLe", outParams);
     }
     /** @internal */
-    _floatGt(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatGt", outParams);
+    _floatGt(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatGt", outParams);
     }
     /** @internal */
-    _floatGe(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new BoolExpr(this._cp, "floatGe", outParams);
+    _floatGe(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this._cp, "floatGe", outParams);
     }
     /** @internal */
     _floatInRange(lb, ub) {
         let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
-        return new BoolExpr(this._cp, "floatInRange", outParams);
+        return BoolExpr._Create(this._cp, "floatInRange", outParams);
     }
     /** @internal */
     _floatNotInRange(lb, ub) {
         let outParams = [this._getArg(), GetFloat(lb), GetFloat(ub)];
-        return new BoolExpr(this._cp, "floatNotInRange", outParams);
+        return BoolExpr._Create(this._cp, "floatNotInRange", outParams);
     }
     /** @internal */
     abs() {
         let outParams = [this._getArg()];
-        return new FloatExpr(this._cp, "floatAbs", outParams);
+        return FloatExpr._Create(this._cp, "floatAbs", outParams);
     }
     /** @internal */
     square() {
         let outParams = [this._getArg()];
-        return new FloatExpr(this._cp, "floatSquare", outParams);
+        return FloatExpr._Create(this._cp, "floatSquare", outParams);
     }
     /** @internal */
-    _floatMin2(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatMin2", outParams);
+    _floatMin2(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatMin2", outParams);
     }
     /** @internal */
-    _floatMax2(arg) {
-        let outParams = [this._getArg(), GetFloatExpr(arg)];
-        return new FloatExpr(this._cp, "floatMax2", outParams);
+    _floatMax2(rhs) {
+        let outParams = [this._getArg(), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this._cp, "floatMax2", outParams);
     }
 }
 /**
- * A class that represents an integer expression in the model.  The expression
- * may depend on the value of a variable (or variables), so the value of the
- * expression is not known until a solution is found.
- * The value must be in the range {@link IntVarMin} to {@link IntVarMax}.
+ * A class representing an integer expression in the model.
+ *
+ * @remarks
+ * The expression may depend on the value of a variable (or variables), so the
+ * value of the expression is not known until a solution is found. The value must
+ * be in the range {@link IntVarMin} to {@link IntVarMax}.
+ *
+ * See {@link IntExpr.plus}, {@link IntExpr.minus}, {@link IntExpr.times} for arithmetic,
+ * and {@link IntExpr.le}, {@link IntExpr.eq}, etc. for comparisons.
  *
  * @example
  *
  * The following code creates two interval variables `x` and `y`
- * and an integer expression `maxEnd` that is equal to the maximum of the end
- * times of `x` and `y` (see {@link max2}):
+ * and an integer expression `makespan` that is equal to the maximum of the end
+ * times of `x` and `y` (see {@link Model.max2}):
  * ```ts
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x" });
  * let y = model.intervalVar({ length: 20, name: "y" });
- * let maxEnd = model.max2(x.end(), y.end());
+ * let makespan = model.max2(x.end(), y.end());
  * ```
  *
- * ### Optional integer expressions
+ * ## Optional integer expressions
  *
  * Underlying variables of an integer expression may be optional, i.e., they may
  * or may not be present in a solution (for example, an optional task
  * can be omitted entirely from the solution). In this case, the value of the
- * integer expression is _absent_. The value _absent_ means that the variable
+ * integer expression is *absent*. The value *absent* means that the variable
  * has no meaning; it does not exist in the solution.
  *
- * Except {@link guard} expression, any value of an integer
- * expression that depends on an absent variable is also _absent_.
+ * Except {@link IntExpr.guard} expression, any value of an integer
+ * expression that depends on an absent variable is also *absent*.
  * As we don't know the value of the expression before the solution is found,
- * we call such expression _optional_.
+ * we call such expression *optional*.
  *
  * @example
  *
@@ -350,325 +606,532 @@ export class FloatExpr extends ModelNode {
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x", optional: true });
  * let y = model.intervalVar({ length: 20, name: "y" });
- * let endX = model.endOf(x);
- * let afterX = endX.plus(10);
- * let startY = model.startOf(y);
- * let isBefore = afterX.le(startY);
- * model.constraint(isBefore);
- * let result = await CP.solve(model);
+ * let finish = model.end(x);
+ * let ready = finish.plus(10);
+ * let begin = model.start(y);
+ * let precedes = ready.le(begin);
+ * model.enforce(precedes);
+ * let result = await model.solve();
  * ```
+ *
  * In this model:
  *
- *  * `endX` is an optional integer expression because it depends on
- *     an optional variable `x`.
- *  * The expression `afterX` is optional for the same reason.
- *  * The expression `startY` is not optional because it depends only on a
- *    non-optional variable `y`.
- *  * Boolean expression `isBefore` is also optional. Its value could be
- *    _true_, _false_ or _absent_.
+ * * `finish` is an optional integer expression because it depends on
+ *   an optional variable `x`.
+ * * The expression `ready` is optional for the same reason.
+ * * The expression `begin` is not optional because it depends only on a
+ *   non-optional variable `y`.
+ * * Boolean expression `precedes` is also optional. Its value could be
+ *   `true`, `false` or *absent*.
  *
- * The expression `isBefore` is turned into a constraint using
- * {@link Model.constraint | Model.constraint}. Therefore, it cannot be _false_
- * in the solution. However, it can still be _absent_. Therefore the constraint
- * `isBefore` can be satisfied in two ways:
+ * The expression `precedes` is turned into a constraint using
+ * {@link Model.enforce}. Therefore, it cannot be `false`
+ * in the solution. However, it can still be *absent*. Therefore the constraint
+ * `precedes` can be satisfied in two ways:
  *
  * 1. Both `x` and `y` are present, `x` is before `y`, and the delay between them
- *    is at least 10. In this case, `isBefore` is _true_.
- * 2. `x` is absent and `y` is present. In this case, `isBefore` is _absent_.
+ * is at least 10. In this case, `precedes` is `true`.
+ * 2. `x` is absent and `y` is present. In this case, `precedes` is *absent*.
  *
  * @group Modeling
  */
 export class IntExpr extends FloatExpr {
-    #isIntExpr;
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(IntExpr.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
     /**
-     * Minimize the expression. I.e., search for a solution that achieves the minimal
-     * value of the expression.
+     * Creates a minimization objective for this expression.
+     *
+     * @returns An Objective that minimizes this expression.
      *
      * @remarks
-     * Equivalent of function {@link Model.minimize | Model.minimize}.
+     * Creates an objective to minimize the value of this integer expression.
+     * A model can have at most one objective. New objective replaces the old one.
+     *
+     * This is a fluent-style alternative to {@link Model.minimize} that allows
+     * creating objectives directly from expressions.
      *
      * @example
      *
-     * In the following model, we search for a solution that minimizes the maximum
-     * end of the two intervals `x` and `y`:
      * ```ts
-     * let model = new CP.Model();
-     * let x = model.intervalVar({ length: 10, name: "x" });
-     * let y = model.intervalVar({ length: 20, name: "y" });
-     * model.max2(x.end(), y.end()).minimize();
-     * let result = await CP.solve(model);
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({length: 10, name: "x"});
+     * const y = model.intervalVar({length: 20, name: "y"});
+     *
+     * // Fluent style - minimize the end of y
+     * y.end().minimize();
+     *
+     * // Equivalent Model.minimize() style:
+     * model.minimize(y.end());
      * ```
+     *
+     * @see {@link Model.minimize} for Model-centric minimization.
+     * @see {@link IntExpr.maximize} for maximization.
      */
     minimize() {
-        this._cp.minimize(this);
+        return this._cp.minimize(this);
     }
     /**
-     * Maximize the expression. I.e., search for a solution that achieves the maximal
-     * value of the expression.
+     * Creates a maximization objective for this expression.
+     *
+     * @returns An Objective that maximizes this expression.
      *
      * @remarks
-     * Equivalent of function {@link Model.maximize | Model.maximize}.
+     * Creates an objective to maximize the value of this integer expression.
+     * A model can have at most one objective. New objective replaces the old one.
      *
-     * The opposite of {@link minimize}.
+     * This is a fluent-style alternative to {@link Model.maximize} that allows
+     * creating objectives directly from expressions.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({start: [0, 100], length: 10, name: "x"});
+     *
+     * // Fluent style - maximize the start of x
+     * x.start().maximize();
+     *
+     * // Equivalent Model.maximize() style:
+     * model.maximize(x.start());
+     * ```
+     *
+     * @see {@link Model.maximize} for Model-centric maximization.
+     * @see {@link IntExpr.minimize} for minimization.
      */
     maximize() {
-        this._cp.maximize(this);
+        return this._cp.maximize(this);
     }
     /** @internal */
     _reusableIntExpr() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "reusableIntExpr", outParams);
+        return IntExpr._Create(this._cp, "reusableIntExpr", outParams);
     }
     /**
-    * Returns an expression which is _true_ if the expression is _present_ and _false_ when it is _absent_.
-    *
-    * @remarks
-    *
-    * The resulting expression is never _absent_.
-    *
-    * Same as {@link Model.presenceOf | Model.presenceOf}. */
+     * Returns an expression which is `true` if the expression is *present* and `false` when it is *absent*.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * The resulting expression is never *absent*.
+     *
+     * Same as {@link Model.presence}.
+     */
     presence() {
         let outParams = [this._getArg()];
-        return new BoolExpr(this._cp, "intPresenceOf", outParams);
+        return BoolExpr._Create(this._cp, "intPresenceOf", outParams);
     }
     /**
-    * Creates an expression that replaces value _absent_ by a constant.
-    *
-    * @remarks
-    *
-    * The resulting expression is:
-    *
-    * * equal to the expression if the expression is _present_
-    * * and equal to `absentValue` otherwise (i.e. when the expression is _absent_).
-    *
-    * The default value of `absentValue` is 0.
-    *
-    * The resulting expression is never _absent_.
-    *
-    * Same as {@link Model.guard | Model.guard}. */
+     * Creates an expression that replaces value *absent* by a constant.
+     *
+     * @param absentValue The value to use when the expression is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The resulting expression is:
+     *
+     * * equal to the expression if the expression is *present*
+     * * and equal to `absentValue` otherwise (i.e. when the expression is *absent*).
+     *
+     * The default value of `absentValue` is 0.
+     *
+     * The resulting expression is never *absent*.
+     *
+     * Same as {@link Model.guard}.
+     */
     guard(absentValue = 0) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        return new IntExpr(this._cp, "intGuard", outParams);
+        return IntExpr._Create(this._cp, "intGuard", outParams);
     }
     /**
-    * Returns negation of the expression.
-    *
-    * @remarks
-    *
-    * If the expression has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.neg | Model.neg}. */
+     * Returns negation of the expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.neg}.
+     */
     neg() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "intNeg", outParams);
+        return IntExpr._Create(this._cp, "intNeg", outParams);
     }
     /**
-    * Returns addition of the expression and the argument.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.plus | Model.plus}. */
-    plus(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intPlus", outParams);
+     * Returns addition of the expression and the argument.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.plus}.
+     */
+    plus(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intPlus", outParams);
     }
     /**
-    * Returns subtraction of the expression and `arg`.@remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.minus | Model.minus}. */
-    minus(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intMinus", outParams);
+     * Returns subtraction of the expression and `arg`.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.minus}.
+     */
+    minus(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intMinus", outParams);
     }
     /**
-    * Returns multiplication of the expression and `arg`.@remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.times | Model.times}. */
-    times(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intTimes", outParams);
+     * Returns multiplication of the expression and `arg`.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.times}.
+     */
+    times(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intTimes", outParams);
     }
     /**
-    * Returns integer division of the expression `arg`. The division rounds towards zero.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.div | Model.div}. */
-    div(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intDiv", outParams);
+     * Returns integer division of the expression `arg`. The division rounds towards zero.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.div}.
+     */
+    div(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intDiv", outParams);
     }
     /** @internal */
-    _modulo(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "modulo", outParams);
+    _modulo(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "modulo", outParams);
     }
     /**
-    * Constrains the expression to be identical to the argument, including their presence status.
-    *
-    * @remarks
-    *
-    * Identity is different than equality. For example, if `x` is _absent_, then `x.eq(0)` is _absent_, but `x.identity(0)` is _false_.
-    *
-    * Same as {@link Model.identity | Model.identity}. */
-    identity(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        new Constraint(this._cp, "intIdentity", outParams);
+     * Constrains two expressions to be identical, including their presence status.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The constraint object
+     *
+     * @remarks
+     * Identity is different than equality. For example, if `x` is *absent*, then `x == 0` is *absent*, but `x.identity(0)` is `false`.
+     *
+     * Same as {@link Model.identity}.
+     */
+    identity(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return Constraint._Create(this._cp, "intIdentity", outParams);
     }
     /**
-    * Creates Boolean expression `this` = `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.eq | Model.eq}. */
-    eq(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intEq", outParams);
+     * Create an equality constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self equals other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self == other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.ne} for inequality comparison.
+     * @see {@link Model.eq} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.eq(IntExpr)
+     * model.enforce(x.eq(y));
+     *
+     * // IntExpr.eq(constant)
+     * model.enforce(x.eq(5));
+     * ```
+     */
+    eq(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intEq", outParams);
     }
     /**
-    * Creates Boolean expression `this` &ne; `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.ne | Model.ne}. */
-    ne(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intNe", outParams);
+     * Create an inequality constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self does not equal other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self != other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.eq} for equality comparison.
+     * @see {@link Model.ne} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.ne(IntExpr)
+     * model.enforce(x.ne(y));
+     *
+     * // IntExpr.ne(constant)
+     * model.enforce(x.ne(5));
+     * ```
+     */
+    ne(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intNe", outParams);
     }
     /**
-    * Creates Boolean expression `this` < `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.lt | Model.lt}. */
-    lt(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intLt", outParams);
+     * Create a less-than constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self is less than other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self < other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.le} for less-than-or-equal comparison.
+     * @see {@link IntExpr.gt} for greater-than comparison.
+     * @see {@link Model.lt} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.lt(IntExpr)
+     * model.enforce(x.lt(y));
+     *
+     * // IntExpr.lt(constant)
+     * model.enforce(x.lt(5));
+     * ```
+     */
+    lt(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intLt", outParams);
     }
     /**
-    * Creates Boolean expression `this` &le; `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.le | Model.le}. */
-    le(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intLe", outParams);
+     * Create a less-than-or-equal constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self is less than or equal to other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self <= other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.lt} for strict less-than comparison.
+     * @see {@link IntExpr.ge} for greater-than-or-equal comparison.
+     * @see {@link Model.le} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.le(IntExpr)
+     * model.enforce(x.le(y));
+     *
+     * // IntExpr.le(constant)
+     * model.enforce(x.le(5));
+     * ```
+     */
+    le(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intLe", outParams);
     }
     /**
-    * Creates Boolean expression `this` > `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.gt | Model.gt}. */
-    gt(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intGt", outParams);
+     * Create a greater-than constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self is greater than other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self > other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.ge} for greater-than-or-equal comparison.
+     * @see {@link IntExpr.lt} for less-than comparison.
+     * @see {@link Model.gt} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.gt(IntExpr)
+     * model.enforce(x.gt(y));
+     *
+     * // IntExpr.gt(constant)
+     * model.enforce(x.gt(5));
+     * ```
+     */
+    gt(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intGt", outParams);
     }
     /**
-    * Creates Boolean expression `this` &ge; `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.ge | Model.ge}. */
-    ge(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new BoolExpr(this._cp, "intGe", outParams);
+     * Create a greater-than-or-equal constraint.
+     *
+     * @param other The expression or constant to compare against.
+     *
+     * @returns A boolean expression that is true when self is greater than or equal to other.
+     *
+     * @remarks
+     * Returns a {@link BoolExpr} representing `self >= other`.
+     *
+     * If either operand has value *absent*, the result is also *absent*.
+     *
+     * @see {@link IntExpr.gt} for strict greater-than comparison.
+     * @see {@link IntExpr.le} for less-than-or-equal comparison.
+     * @see {@link Model.ge} for the Model-centric style.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // IntExpr.ge(IntExpr)
+     * model.enforce(x.ge(y));
+     *
+     * // IntExpr.ge(constant)
+     * model.enforce(x.ge(5));
+     * ```
+     */
+    ge(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return BoolExpr._Create(this._cp, "intGe", outParams);
     }
     /**
-    * Creates Boolean expression `lb` &le; `this` &le; `ub`.
-    *
-    * @remarks
-    *
-    * If the expression has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link Model.inRange | Model.inRange}. */
+     * Creates Boolean expression `lb` ≤ `this` ≤ `ub`.
+     *
+     * @param lb The lower bound of the range.
+     * @param ub The upper bound of the range.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the expression has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link Model.inRange}.
+     */
     inRange(lb, ub) {
         let outParams = [this._getArg(), GetInt(lb), GetInt(ub)];
-        return new BoolExpr(this._cp, "intInRange", outParams);
+        return BoolExpr._Create(this._cp, "intInRange", outParams);
     }
     /** @internal */
     _notInRange(lb, ub) {
         let outParams = [this._getArg(), GetInt(lb), GetInt(ub)];
-        return new BoolExpr(this._cp, "intNotInRange", outParams);
+        return BoolExpr._Create(this._cp, "intNotInRange", outParams);
     }
     /**
-    * Creates an integer expression which is absolute value of the expression.
-    *
-    * @remarks
-    *
-    * If the expression has value _absent_, the resulting expression also has value _absent_.
-    *
-    * Same as {@link Model.abs | Model.abs}.  */
+     * Creates an integer expression which is absolute value of the expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression has value *absent*, the resulting expression also has value *absent*.
+     *
+     * Same as {@link Model.abs}.
+     */
     abs() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "intAbs", outParams);
+        return IntExpr._Create(this._cp, "intAbs", outParams);
     }
     /**
-    * Creates an integer expression which is the minimum of the expression and `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.min2 | Model.min2}. See {@link Model.min} for the n-ary minimum. */
-    min2(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intMin2", outParams);
+     * Creates an integer expression which is the minimum of the expression and `arg`.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.min2}. See {@link Model.min} for the n-ary minimum.
+     */
+    min2(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intMin2", outParams);
     }
     /**
-    * Creates an integer expression which is the maximum of the expression and `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.max2 | Model.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
-    max2(arg) {
-        let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intMax2", outParams);
+     * Creates an integer expression which is the maximum of the expression and `arg`.
+     *
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.max2}. See {@link Model.max} for n-ary maximum.
+     */
+    max2(rhs) {
+        let outParams = [this._getArg(), GetIntExpr(rhs)];
+        return IntExpr._Create(this._cp, "intMax2", outParams);
     }
     /** @internal */
     square() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "intSquare", outParams);
+        return IntExpr._Create(this._cp, "intSquare", outParams);
     }
 }
 /**
+ * @remarks
  * A class that represents a boolean expression in the model.
  * The expression may depend on one or more variables; therefore, its value
  * may be unknown until a solution is found.
@@ -676,45 +1139,44 @@ export class IntExpr extends FloatExpr {
  * @example
  *
  * For example, the following code creates two interval variables, `x` and `y`
- * and a boolean expression `isBefore` that is true if `x` ends before `y` starts,
+ * and a boolean expression `precedes` that is true if `x` ends before `y` starts,
  * that is, if the end of `x` is less than or equal to
- * the start of `y` (see {@link IntExpr.le | IntExpr.le}):
+ * the start of `y`:
+ *
+ * See {@link IntExpr.le} for the comparison method.
  * ```ts
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x" });
  * let y = model.intervalVar({ length: 20, name: "y" });
- * let isBefore = x.end().le(y.start());
- * let result = await CP.solve(model);
+ * let precedes = x.end().le(y.start());
+ * let result = await model.solve();
  * ```
  *
- * Boolean expressions can be used to create constraints using function {@link
- * Model.constraint | Model.constraint}. In the example above, we may require that `isBefore` is
- * true or _absent_:
+ * Boolean expressions can be used to create constraints using {@link Model.enforce}. In the example above, we may require that `precedes` is
+ * true or *absent*:
  * ```ts
- * model.constraint(isBefore);
+ * model.enforce(precedes);
  * ```
  *
  * ### Optional boolean expressions
  *
- * _OptalCP_ is using 3-value logic: a boolean expression can be _true_, _false_
- * or _absent_. Typically, the expression is _absent_ only if one or
- * more underlying variables are _absent_.  The value _absent_
+ * _OptalCP_ is using 3-value logic: a boolean expression can be `true`, `false`
+ * or *absent*. Typically, the expression is *absent* only if one or
+ * more underlying variables are *absent*.  The value *absent*
  * means that the expression doesn't have a meaning because one or more
  * underlying variables are absent (not part of the solution).
  *
  * ### Difference between constraints and boolean expressions
  *
- * Boolean expressions can take arbitrary value (_true_, _false_, or _absent_)
- * and can be combined into composed expressions (e.g., using {@link and} or
- * {@link or}).
+ * Boolean expressions can take arbitrary value (`true`, `false`, or *absent*)
+ * and can be combined into composed expressions (e.g., using {@link BoolExpr.and} or
+ * {@link BoolExpr.or}).
  *
- * Constraints can only be _true_ or _absent_ (in a solution) and cannot
+ * Constraints can only be `true` or *absent* (in a solution) and cannot
  * be combined into composed expressions.
  *
  * Some functions create constraints directly, e.g. {@link Model.noOverlap}.
- * Then, passing them to function {@link Model.constraint} is unnecessary.
- * It is also not possible to combine constraints into composed expressions
- * such as `or(noOverlap(..), noOverlap(..))`.
+ * It is not possible to combine constraints using logical operators like `or`.
  *
  * @example
  *
@@ -725,13 +1187,13 @@ export class IntExpr extends FloatExpr {
  * let model = new CP.Model();
  * let a = model.intervalVar({ length: 10, name: "a", optional: true });
  * let b = model.intervalVar({ length: 20, name: "b", optional: true });
- * let isBefore = a.end().le(b.start());
- * model.constraint(isBefore);
- * let result = await CP.solve(model);
+ * let precedes = a.end().le(b.start());
+ * model.enforce(precedes);
+ * let result = await model.solve();
  * ```
  *
- * The function {@link Model.constraint | Model.constraint} requires that the
- * constraint cannot be _false_ in a solution. It could be _absent_ though.
+ * Adding a boolean expression as a constraint requires that the expression
+ * cannot be `false` in a solution. It could be *absent* though.
  * Therefore, in our example, there are four kinds of solutions:
  *
  * 1. Both `a` and `b` are present, and `a` ends before `b` starts.
@@ -739,94 +1201,123 @@ export class IntExpr extends FloatExpr {
  * 3. Only `b` is present, and `a` is absent.
  * 4. Both `a` and `b` are absent.
  *
- * In case 1, the expression `isBefore` is _true_. In all the other cases
- * `isBefore` is _absent_ as at least one of the variables `a` and `b` is
- * absent, and then `isBefore` doesn't have a meaning.
+ * In case 1, the expression `precedes` is `true`. In all the other cases
+ * `precedes` is *absent* as at least one of the variables `a` and `b` is
+ * absent, and then `precedes` doesn't have a meaning.
  *
  * ### Boolean expressions as integer expressions
  *
  * Class `BoolExpr` derives from {@link IntExpr}. Therefore, boolean expressions can be used
- * as integer expressions. In this case, _true_ is equal to _1_, _false_ is
- * equal to _0_, and _absent_ remains _absent_.
+ * as integer expressions. In this case, `true` is equal to `1`, `false` is
+ * equal to `0`, and *absent* remains *absent*.
  *
  * @group Modeling
  */
 export class BoolExpr extends IntExpr {
-    #isBoolExpr;
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(BoolExpr.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
     /** @internal */
     _reusableBoolExpr() {
         let outParams = [this._getArg()];
-        return new BoolExpr(this._cp, "reusableBoolExpr", outParams);
+        return BoolExpr._Create(this._cp, "reusableBoolExpr", outParams);
     }
     /**
-    * Returns negation of the expression.
-    *
-    * @remarks
-    *
-    * If the expression has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.not | Model.not}. */
+     * Returns negation of the expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the expression has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.not}.
+     */
     not() {
         let outParams = [this._getArg()];
-        return new BoolExpr(this._cp, "boolNot", outParams);
+        return BoolExpr._Create(this._cp, "boolNot", outParams);
     }
     /**
-    * Returns logical _OR_ of the expression and `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.or | Model.or}. */
-    or(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolOr", outParams);
+     * Returns logical _OR_ of the expression and `arg`.
+     *
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.or}.
+     */
+    or(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolOr", outParams);
     }
     /**
-    * Returns logical _AND_ of the expression and `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.and | Model.and}. */
-    and(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolAnd", outParams);
+     * Returns logical _AND_ of the expression and `arg`.
+     *
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.and}.
+     */
+    and(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolAnd", outParams);
     }
     /**
-    * Returns implication between the expression and `arg`.
-    *
-    * @remarks
-    *
-    * If the expression or `arg` has value _absent_, then the resulting expression has also value _absent_.
-    *
-    * Same as {@link Model.implies | Model.implies}. */
-    implies(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolImplies", outParams);
+     * Returns implication between the expression and `arg`.
+     *
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the expression or `arg` has value *absent*, then the resulting expression has also value *absent*.
+     *
+     * Same as {@link Model.implies}.
+     */
+    implies(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolImplies", outParams);
     }
     /** @internal */
-    _eq(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolEq", outParams);
+    _eq(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolEq", outParams);
     }
     /** @internal */
-    _ne(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolNe", outParams);
+    _ne(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolNe", outParams);
     }
     /** @internal */
-    _nand(arg) {
-        let outParams = [this._getArg(), GetBoolExpr(arg)];
-        return new BoolExpr(this._cp, "boolNand", outParams);
+    _nand(rhs) {
+        let outParams = [this._getArg(), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this._cp, "boolNand", outParams);
     }
 }
 /** @internal */
-export class Objective extends ModelNode {
-    #isObjective;
+export class Objective extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(Objective.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
 }
 /**
+ * @remarks
  * Integer variable represents an unknown (integer) value that solver has to find.
  *
  * The value of the integer variable can be constrained using mathematical expressions, such as {@link Model.plus}, {@link Model.times}, {@link Model.le}, {@link Model.sum}.
@@ -838,9 +1329,9 @@ export class Objective extends ModelNode {
  *
  * The integer variable can be optional.
  * In this case, the solver can make the variable absent, which is usually interpreted as the fact that the solver does not use the variable at all.
- * Functions {@link Model.presenceOf} and {@link IntExpr.presence} can constrain the presence of the variable.
+ * Functions {@link Model.presence} and {@link IntExpr.presence} can constrain the presence of the variable.
  *
- * Integer variables can be created using the function {@link Model.intVar | Model.intVar}.
+ * Integer variables can be created using the function {@link Model.intVar}.
  *
  * @example
  *
@@ -858,139 +1349,556 @@ export class Objective extends ModelNode {
  * @group Modeling
  */
 export class IntVar extends IntExpr {
-    constructor(cp, props, id) {
-        if (props === undefined) {
-            super(cp, "intVar", []);
-            this._forceRef();
-        }
-        else
-            super(cp, props, id);
+    // TODO:3 Int var must support ranges and enumerated domain.
+    /** @internal */
+    static _Create(cp) {
+        const instance = Object.create(IntVar.prototype);
+        instance._cp = cp;
+        instance._props = {
+            func: "intVar",
+            args: [],
+            min: undefined,
+            max: undefined,
+            status: undefined,
+            name: undefined
+        };
+        instance._arg = { arg: undefined, ref: cp._getNewRefId(instance._props) };
+        return instance;
     }
     /** @internal */
-    _makeAuxiliary() { this._props.func = "_intVar"; }
-    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
-    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
-    getMin() {
-        if (this.isAbsent())
-            return null;
-        return this._props.min ?? IntVarMin;
+    static _CreateFromJSON(cp, props, id) {
+        const instance = Object.create(IntVar.prototype);
+        instance._cp = cp;
+        instance._props = props;
+        instance._arg = { arg: undefined, ref: id };
+        return instance;
     }
-    getMax() {
-        if (this.isAbsent())
+    // @internal Optimized version (ref is always set):
+    _getArg() { return this._arg; }
+    /** @internal */
+    _makeAuxiliary() { this._props.func = "_intVar"; }
+    /**
+     * The presence status of the integer variable.
+     *
+     * @remarks
+     * Gets or sets the presence status of the integer variable using a tri-state value:
+     *
+     * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
+     * - `False` / `false`: The variable is *present* - it must have a value in the solution.
+     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * **Note:** This property reflects the presence status in the model
+     * (before the solve), not in the solution.
+     *
+     * @see {@link IntVar.min}, {@link IntVar.max}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, optional: true, name: "y" });
+     *
+     * console.log(x.optional);  // false (present by default)
+     * console.log(y.optional);  // true (optional)
+     *
+     * // Make x optional
+     * x.optional = true;
+     * console.log(x.optional);  // true
+     *
+     * // Make y absent
+     * y.optional = null;
+     * console.log(y.optional);  // null
+     * ```
+     */
+    get optional() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        if (this._props.status === 0 /* PresenceStatus.Optional */)
+            return true;
+        return false;
+    }
+    set optional(value) {
+        if (value === null)
+            this._props.status = 2 /* PresenceStatus.Absent */;
+        else if (value)
+            this._props.status = 0 /* PresenceStatus.Optional */;
+        else
+            this._props.status = undefined;
+    }
+    /**
+     * The minimum value of the integer variable's domain.
+     *
+     * @remarks
+     * Gets or sets the minimum value of the integer variable's domain.
+     *
+     * The initial value is set during construction by {@link Model.intVar}.
+     * If the variable is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the variable's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntVarMin} to {@link IntVarMax}.
+     *
+     * @see {@link IntVar.max}, {@link IntVar.optional}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 5, max: 10, name: "x" });
+     *
+     * console.log(x.min);  // 5
+     *
+     * x.min = 7;
+     * console.log(x.min);  // 7
+     * ```
+     */
+    get min() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.min ?? 0;
+    }
+    set min(value) { this._props.min = GetInt(value); }
+    /**
+     * The maximum value of the integer variable's domain.
+     *
+     * @remarks
+     * Gets or sets the maximum value of the integer variable's domain.
+     *
+     * The initial value is set during construction by {@link Model.intVar}.
+     * If the variable is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the variable's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntVarMin} to {@link IntVarMax}.
+     *
+     * @see {@link IntVar.min}, {@link IntVar.optional}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 5, max: 10, name: "x" });
+     *
+     * console.log(x.max);  // 10
+     *
+     * x.max = 8;
+     * console.log(x.max);  // 8
+     * ```
+     */
+    get max() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.max ?? IntVarMax;
     }
-    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; return this; }
-    makePresent() { this._props.status = undefined; return this; }
-    setMin(min) {
-        this._props.min = GetInt(min);
-        return this;
+    set max(value) { this._props.max = GetInt(value); }
+    /** @deprecated Use `optional` property instead */
+    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
+    /** @deprecated Use `optional` property instead */
+    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `min` property instead */
+    getMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.min ?? 0;
     }
-    setMax(max) {
-        this._props.max = GetInt(max);
-        return this;
+    /** @deprecated Use `max` property instead */
+    getMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.max ?? IntVarMax;
     }
+    /** @deprecated Use `optional` property instead */
+    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `optional` property instead */
+    makePresent() { this._props.status = undefined; }
+    /** @deprecated Use `min` property instead */
+    setMin(min) { this._props.min = GetInt(min); }
+    /** @deprecated Use `max` property instead */
+    setMax(max) { this._props.max = GetInt(max); }
+    /** @deprecated Use `min` and `max` properties instead */
     setRange(min, max) {
         this._props.min = GetInt(min);
         this._props.max = GetInt(max);
-        return this;
     }
 }
 /** @internal */
 export class FloatVar extends FloatExpr {
-    constructor(cp, props, id) {
-        if (props === undefined) {
-            super(cp, "floatVar", []);
-            this._forceRef();
-        }
-        else
-            super(cp, props, id);
+    // TODO:3 Float var must support ranges and enumerated domain.
+    /** @internal */
+    static _Create(cp) {
+        const instance = Object.create(FloatVar.prototype);
+        instance._cp = cp;
+        instance._props = {
+            func: "floatVar",
+            args: [],
+            min: undefined,
+            max: undefined,
+            status: undefined,
+            name: undefined
+        };
+        instance._arg = { arg: undefined, ref: cp._getNewRefId(instance._props) };
+        return instance;
     }
     /** @internal */
+    static _CreateFromJSON(cp, props, id) {
+        const instance = Object.create(FloatVar.prototype);
+        instance._cp = cp;
+        instance._props = props;
+        instance._arg = { arg: undefined, ref: id };
+        return instance;
+    }
+    // @internal Optimized version (ref is always set):
+    _getArg() { return this._arg; }
+    /** @internal */
     _makeAuxiliary() { this._props.func = "_floatVar"; }
-    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
-    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
-    getMin() {
-        if (this.isAbsent())
+    get optional() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        if (this._props.status === 0 /* PresenceStatus.Optional */)
+            return true;
+        return false;
+    }
+    set optional(value) {
+        if (value === null)
+            this._props.status = 2 /* PresenceStatus.Absent */;
+        else if (value)
+            this._props.status = 0 /* PresenceStatus.Optional */;
+        else
+            this._props.status = undefined;
+    }
+    get min() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.min ?? FloatVarMin;
     }
-    getMax() {
-        if (this.isAbsent())
+    set min(value) { this._props.min = GetFloat(value); }
+    get max() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.max ?? FloatVarMax;
     }
-    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; return this; }
-    makePresent() { this._props.status = undefined; return this; }
-    setMin(min) {
-        this._props.min = GetFloat(min);
-        return this;
-    }
-    setMax(max) {
-        this._props.max = GetFloat(max);
-        return this;
-    }
-    setRange(min, max) {
-        this._props.min = GetFloat(min);
-        this._props.max = GetFloat(max);
-        return this;
-    }
-}
-/** @internal */
-export class BoolVar extends BoolExpr {
-    constructor(cp, props, id) {
-        if (props === undefined) {
-            super(cp, "boolVar", []);
-            this._forceRef();
-        }
-        else
-            super(cp, props, id);
-    }
-    /** @internal */
-    _makeAuxiliary() { this._props.func = "_boolVar"; }
+    set max(value) { this._props.max = GetFloat(value); }
+    /** @deprecated Use `optional` property instead */
     isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
     isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
+    /** @deprecated Use `optional` property instead */
     isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `min` property instead */
     getMin() {
-        if (this.isAbsent())
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
-        return this._props.min ?? false;
+        return this._props.min ?? FloatVarMin;
     }
+    /** @deprecated Use `max` property instead */
     getMax() {
-        if (this.isAbsent())
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
-        return this._props.max ?? true;
+        return this._props.max ?? FloatVarMax;
     }
-    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; return this; }
-    makePresent() { this._props.status = undefined; return this; }
-    setMin(min) {
-        this._props.min = min;
-        return this;
-    }
-    setMax(max) {
-        this._props.max = max;
-        return this;
-    }
+    /** @deprecated Use `optional` property instead */
+    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `optional` property instead */
+    makePresent() { this._props.status = undefined; }
+    /** @deprecated Use `min` property instead */
+    setMin(min) { this._props.min = GetFloat(min); }
+    /** @deprecated Use `max` property instead */
+    setMax(max) { this._props.max = GetFloat(max); }
+    /** @deprecated Use `min` and `max` properties instead */
     setRange(min, max) {
-        this._props.min = min;
-        this._props.max = max;
-        return this;
+        this._props.min = GetFloat(min);
+        this._props.max = GetFloat(max);
     }
 }
 /**
+ * @remarks
+ * Boolean variable represents an unknown truth value (`True` or `False`) that the solver must find.
+ *
+ * Boolean variables are useful for modeling decisions, choices, or logical conditions in your problem. For example, you can use boolean variables to represent whether a machine is used, whether a task is assigned to a particular worker, or whether a constraint should be enforced.
+ *
+ * Boolean variables can be created using the function {@link Model.boolVar}.
+ * By default, boolean variables are *present* (not optional).
+ * To create an optional boolean variable, specify `optional=True` in the arguments of the function.
+ *
+ * ### Logical operators
+ *
+ * Boolean variables support the following logical operators:
+ *
+ * - {@link BoolExpr.not} for logical NOT
+ * - {@link BoolExpr.or} for logical OR
+ * - {@link BoolExpr.and} for logical AND
+ *
+ * These operators can be used to create complex boolean expressions and constraints.
+ *
+ * ### Boolean variables as integer expressions
+ *
+ * Class `BoolVar` derives from {@link BoolExpr}, which derives from {@link IntExpr}.
+ * Therefore, boolean variables can be used as integer expressions:
+ * *True* is equal to *1*, *False* is equal to *0*, and *absent* remains *absent*.
+ *
+ * This is useful for counting how many conditions are satisfied or for weighted sums.
+ *
+ * ### Optional boolean variables
+ *
+ * A boolean variable can be optional. In this case, the solver can decide to make the variable *absent*, which means the variable doesn't participate in the solution. When a boolean variable is absent, its value is neither `True` nor `False` — it is *absent*.
+ *
+ * Most expressions that depend on an absent variable are also *absent*. For example, if `x` is an absent boolean variable, then `~x`, `x | y`, and `x & y` are all *absent*, regardless of the value of `y`. However, some functions handle absent values specially, such as {@link IntExpr.presence} or {@link Model.sum}.
+ *
+ * When a boolean expression is added as a constraint using {@link Model.enforce}, the constraint requires that the expression is not `false` in the solution. The expression can be `true` or *absent*. This means that constraints involving optional variables are automatically satisfied when the underlying variables are absent.
+ *
+ * Functions {@link Model.presence} and {@link IntExpr.presence} can constrain the presence of the variable.
+ *
+ * @see {@link Model.boolVar} to create boolean variables.
+ * @see {@link BoolExpr} for boolean expressions and their operations.
+ * @see {@link IntVar} for integer decision variables.
+ * @see {@link IntervalVar} for the primary variable type for scheduling problems.
+ *
+ * @example
+ *
+ * In the following example, we create two boolean variables representing whether to use each of two machines. We require that at least one machine is used, but not both:
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * const useMachineA = model.boolVar({ name: "use_machine_a" });
+ * const useMachineB = model.boolVar({ name: "use_machine_b" });
+ *
+ * // Constraint: must use at least one machine
+ * model.enforce(useMachineA.or(useMachineB));
+ *
+ * // Constraint: cannot use both machines (exclusive choice)
+ * model.enforce(useMachineA.and(useMachineB).not());
+ *
+ * const result = await model.solve();
+ * ```
+ *
+ * @example
+ *
+ * Boolean variables can be used in arithmetic expressions by treating `True` as 1 and `False` as 0:
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * const options = Array.from({length: 5}, (_, i) => model.boolVar({ name: `option_${i}` }));
+ *
+ * // Constraint: select exactly 2 options
+ * model.enforce(model.sum(options).eq(2));
+ *
+ * const result = await model.solve();
+ * ```
+ *
+ * @group Modeling
+ */
+export class BoolVar extends BoolExpr {
+    /** @internal */
+    static _Create(cp) {
+        const instance = Object.create(BoolVar.prototype);
+        instance._cp = cp;
+        instance._props = {
+            func: "boolVar",
+            args: [],
+            min: undefined,
+            max: undefined,
+            status: undefined,
+            name: undefined
+        };
+        instance._arg = { arg: undefined, ref: cp._getNewRefId(instance._props) };
+        return instance;
+    }
+    /** @internal */
+    static _CreateFromJSON(cp, props, id) {
+        const instance = Object.create(BoolVar.prototype);
+        instance._cp = cp;
+        instance._props = props;
+        instance._arg = { arg: undefined, ref: id };
+        return instance;
+    }
+    // @internal Optimized version (ref is always set):
+    _getArg() { return this._arg; }
+    /** @internal */
+    _makeAuxiliary() { this._props.func = "_boolVar"; }
+    /**
+     * The presence status of the boolean variable.
+     *
+     * @remarks
+     * Gets or sets the presence status of the boolean variable using a tri-state value:
+     *
+     * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
+     * - `False` / `false`: The variable is *present* - it must have a value in the solution.
+     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * **Note:** This property reflects the presence status in the model
+     * (before the solve), not in the solution.
+     *
+     * @see {@link BoolVar.min}, {@link BoolVar.max}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.boolVar({ name: "x" });
+     * const y = model.boolVar({ optional: true, name: "y" });
+     *
+     * console.log(x.optional);  // false (present by default)
+     * console.log(y.optional);  // true (optional)
+     *
+     * // Make x optional
+     * x.optional = true;
+     * console.log(x.optional);  // true
+     *
+     * // Make y absent
+     * y.optional = null;
+     * console.log(y.optional);  // null
+     * ```
+     */
+    get optional() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        if (this._props.status === 0 /* PresenceStatus.Optional */)
+            return true;
+        return false;
+    }
+    set optional(value) {
+        if (value === null)
+            this._props.status = 2 /* PresenceStatus.Absent */;
+        else if (value)
+            this._props.status = 0 /* PresenceStatus.Optional */;
+        else
+            this._props.status = undefined;
+    }
+    /**
+     * The minimum value of the boolean variable's domain.
+     *
+     * @remarks
+     * Gets or sets the minimum value of the boolean variable's domain.
+     *
+     * For a free (unconstrained) boolean variable, returns `False`.
+     * If set to `True`, the variable is fixed to `True`.
+     * If the variable is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the variable's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * @see {@link BoolVar.max}, {@link BoolVar.optional}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.boolVar({ name: "x" });
+     *
+     * console.log(x.min);  // false (default minimum)
+     *
+     * x.min = true;
+     * console.log(x.min);  // true (variable is now fixed to true)
+     * ```
+     */
+    get min() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.min ?? false;
+    }
+    set min(value) { this._props.min = value; }
+    /**
+     * The maximum value of the boolean variable's domain.
+     *
+     * @remarks
+     * Gets or sets the maximum value of the boolean variable's domain.
+     *
+     * For a free (unconstrained) boolean variable, returns `True`.
+     * If set to `False`, the variable is fixed to `False`.
+     * If the variable is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the variable's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * @see {@link BoolVar.min}, {@link BoolVar.optional}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.boolVar({ name: "x" });
+     *
+     * console.log(x.max);  // true (default maximum)
+     *
+     * x.max = false;
+     * console.log(x.max);  // false (variable is now fixed to false)
+     * ```
+     */
+    get max() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.max ?? true;
+    }
+    set max(value) { this._props.max = value; }
+    /** @deprecated Use `optional` property instead */
+    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
+    /** @deprecated Use `optional` property instead */
+    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `min` property instead */
+    getMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.min ?? false;
+    }
+    /** @deprecated Use `max` property instead */
+    getMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.max ?? true;
+    }
+    /** @deprecated Use `optional` property instead */
+    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `optional` property instead */
+    makePresent() { this._props.status = undefined; }
+    /** @deprecated Use `min` property instead */
+    setMin(min) { this._props.min = min; }
+    /** @deprecated Use `max` property instead */
+    setMax(max) { this._props.max = max; }
+    /** @deprecated Use `min` and `max` properties instead */
+    setRange(minVal, maxVal) {
+        this._props.min = minVal;
+        this._props.max = maxVal;
+    }
+}
+/**
+ * @remarks
  * Interval variable is a task, action, operation, or any other interval with a start
  * and an end. The start and the end of the interval are unknowns that the solver
  * has to find. They could be accessed as integer expressions using
- * {@link IntervalVar.start | IntervalVar.start} and {@link IntervalVar.end | IntervalVar.end}.
- * or using {@link Model.startOf | Model.startOf} and {@link Model.endOf | Model.endOf}.
+ * {@link IntervalVar.start} and {@link IntervalVar.end}.
+ * or using {@link Model.start} and {@link Model.end}.
  * In addition to the start and the end of the interval, the interval variable
  * has a length (equal to _end - start_) that can be accessed using
- * {@link IntervalVar.length | IntervalVar.length} or {@link Model.lengthOf | Model.lengthOf}.
+ * {@link IntervalVar.length} or {@link Model.length}.
  *
  * The interval variable can be optional. In this case, the solver can decide
  * to make the interval absent, which is usually interpreted as the fact that
@@ -998,16 +1906,15 @@ export class BoolVar extends BoolExpr {
  * was not performed.  When the interval variable is absent, its start, end,
  * and length are also absent.  A boolean expression that represents the presence
  * of the interval variable can be accessed using
- * {@link IntervalVar.presence | IntervalVar.presence} and {@link Model.presenceOf | Model.presenceOf}.
- *
+ * {@link IntervalVar.presence} and {@link Model.presence}.
  *
  * Interval variables can be created using the function
- * {@link Model.intervalVar | Model.intervalVar}.
- * By default, interval variables are _present_ (not optional).
+ * {@link Model.intervalVar}.
+ * By default, interval variables are *present* (not optional).
  * To create an optional interval, specify `optional: true` in the
  * arguments of the function.
  *
- * @example: present interval variables
+ * @example
  *
  * In the following example we create three present interval variables `x`, `y` and `z`
  * and we make sure that they don't overlap.  Then, we minimize the maximum of
@@ -1019,10 +1926,10 @@ export class BoolVar extends BoolExpr {
  * let z = model.intervalVar({ length: 10, name: "z" });
  * model.noOverlap([x, y, z]);
  * model.max([x.end(), y.end(), z.end()]).minimize();
- * let result = await CP.solve(model);
+ * let result = await model.solve();
  * ```
  *
- * @example: optional interval variables
+ * @example
  *
  * In the following example, there is a task _X_ that could be performed by two
  * different workers _A_ and _B_.  The interval variable `X` represents the task.
@@ -1030,7 +1937,7 @@ export class BoolVar extends BoolExpr {
  * `XA` represents the task `X` when performed by worker _A_ and
  * similarly `XB` represents the task `X` when performed by worker _B_.
  * Both `XA` and `XB` are optional because it is not known beforehand which
- * worker will perform the task.  The constraint {@link alternative} links
+ * worker will perform the task.  The constraint {@link IntervalVar.alternative} links
  * `X`, `XA` and `XB` together and ensures that only one of `XA` and `XB` is present and that
  * `X` and the present interval are equal.
  *
@@ -1040,8 +1947,9 @@ export class BoolVar extends BoolExpr {
  * let XA = model.intervalVar({ name: "XA", optional: true });
  * let XB = model.intervalVar({ name: "XB", optional: true });
  * model.alternative(X, [XA, XB]);
- * let result = await CP.solve(model);
+ * let result = await model.solve();
  * ```
+ *
  * Variables `XA` and `XB` can be used elsewhere in the model, e.g. to make sure
  * that each worker is assigned to at most one task at a time:
  * ```ts
@@ -1053,829 +1961,1091 @@ export class BoolVar extends BoolExpr {
  *
  * @group Modeling
  */
-export class IntervalVar extends ModelNode {
-    #isIntervalVar;
-    constructor(cp, props, id) {
-        if (props === undefined) {
-            super(cp, "intervalVar", []);
-            this._forceRef();
-        }
-        else
-            super(cp, props, id);
+export class IntervalVar extends ModelElement {
+    /** @internal */
+    static _Create(cp) {
+        const instance = Object.create(IntervalVar.prototype);
+        instance._cp = cp;
+        instance._props = {
+            func: "intervalVar",
+            args: [],
+            startMin: undefined,
+            startMax: undefined,
+            endMin: undefined,
+            endMax: undefined,
+            lengthMin: undefined,
+            lengthMax: undefined,
+            status: undefined,
+            name: undefined
+        };
+        instance._arg = { arg: undefined, ref: cp._getNewRefId(instance._props) };
+        return instance;
     }
+    /** @internal */
+    static _CreateFromJSON(cp, props, id) {
+        const instance = Object.create(IntervalVar.prototype);
+        instance._cp = cp;
+        instance._props = props;
+        instance._arg = { arg: undefined, ref: id };
+        return instance;
+    }
+    // @internal Optimized version (ref is always set):
+    _getArg() { return this._arg; }
     /** @internal */
     _makeAuxiliary() { this._props.func = "_intervalVar"; }
     /**
-     * Returns _true_ if the interval variable was created as _optional_.
-     * Optional interval variable can be _absent_ in the solution, i.e., it can be omitted.
+     * The presence status of the interval variable.
      *
-     * **Note:** This function checks the presence status of the variable in the model
+     * @remarks
+     * Gets or sets the presence status of the interval variable using a tri-state value:
+     *
+     * - `True` / `true`: The interval is *optional* - the solver decides whether it is present or absent in the solution.
+     * - `False` / `false`: The interval is *present* - it must be scheduled in the solution.
+     * - `None` / `null`: The interval is *absent* - it will be omitted from the solution (and everything that depends on it).
+     *
+     * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
      *
-     * @see {@link isPresent}, {@link isAbsent}
-     * @see {@link makeOptional}, {@link makePresent}, {@link makeAbsent}
+     * @see {@link IntervalVar.startMin}, {@link IntervalVar.endMin}, {@link IntervalVar.lengthMin}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task1 = model.intervalVar({ length: 10, name: "task1" });
+     * const task2 = model.intervalVar({ length: 10, optional: true, name: "task2" });
+     *
+     * console.log(task1.optional);  // false (present by default)
+     * console.log(task2.optional);  // true (optional)
+     *
+     * // Make task1 optional
+     * task1.optional = true;
+     * console.log(task1.optional);  // true
+     *
+     * // Make task2 absent
+     * task2.optional = null;
+     * console.log(task2.optional);  // null
+     * ```
      */
-    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
-    /**
-     * Returns _true_ if the interval variable was created _present_ (and
-     * therefore cannot be _absent_ in the solution).
-     *
-     * **Note:** This function returns the presence status of the interval in the
-     * model (before the solve), not in the solution.  In particular, for an
-     * optional interval variable, this function returns _false_, even though there
-     * could be a solution in which the interval is _present_.
-     *
-     * @see {@link isOptional}, {@link isAbsent}
-     * @see {@link makeOptional}, {@link makePresent}, {@link makeAbsent}
-     */
-    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
-    /**
-     * Returns _true_ if the interval variable was created _absent_ (and therefore
-     * cannot be _present_ in the solution).
-     *
-     * **Note:** This function checks the presence status of the interval in the model
-     * (before the solve), not in the solution.  In particular, for an optional
-     * interval variable, this function returns _false_, even though there could be
-     * a solution in which the interval is _absent_.
-     *
-     * @see {@link isOptional}, {@link isPresent}
-     * @see {@link makeOptional}, {@link makePresent}, {@link makeAbsent}
-     */
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
-    /**
-     * Returns minimum start value assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setStart} or function {@link setStartMin}.
-     *
-     * If the interval is absent, the function returns `null`.
-     *
-     * **Note:** This function returns the minimum start of the interval in the
-     * model (before the solve), not in the solution.
-     */
-    getStartMin() {
-        if (this.isAbsent())
+    get optional() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
-        return this._props.startMin ?? IntervalMin;
+        if (this._props.status === 0 /* PresenceStatus.Optional */)
+            return true;
+        return false;
+    }
+    set optional(value) {
+        if (value === null)
+            this._props.status = 2 /* PresenceStatus.Absent */;
+        else if (value)
+            this._props.status = 0 /* PresenceStatus.Optional */;
+        else
+            this._props.status = undefined;
     }
     /**
-     * Returns maximum start value assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setStart} or function {@link setStartMax}.
+     * The minimum start time of the interval variable.
      *
-     * If the interval is absent, the function returns `null`.
+     * @remarks
+     * Gets or sets the minimum start time of the interval variable.
      *
-     * **Note:** This function returns the maximum start of the interval in the
-     * model (before the solve), not in the solution.
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntervalMin} to {@link IntervalMax}.
+     *
+     * @see {@link IntervalVar.startMax}, {@link IntervalVar.endMin}, {@link IntervalVar.lengthMin}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * console.log(task.startMin);  // 0 (default)
+     *
+     * task.startMin = 5;
+     * console.log(task.startMin);  // 5
+     * ```
      */
-    getStartMax() {
-        if (this.isAbsent())
+    get startMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.startMin ?? 0;
+    }
+    set startMin(value) { this._props.startMin = GetInt(value); }
+    /**
+     * The maximum start time of the interval variable.
+     *
+     * @remarks
+     * Gets or sets the maximum start time of the interval variable.
+     *
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntervalMin} to {@link IntervalMax}.
+     *
+     * @see {@link IntervalVar.startMin}, {@link IntervalVar.endMax}, {@link IntervalVar.lengthMax}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * task.startMax = 100;
+     * console.log(task.startMax);  // 100
+     * ```
+     */
+    get startMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.startMax ?? IntervalMax;
     }
+    set startMax(value) { this._props.startMax = GetInt(value); }
     /**
-     * Returns minimum end assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setEnd} or function {@link setEndMin}.
+     * The minimum end time of the interval variable.
      *
-     * If the interval is absent, the function returns `null`.
+     * @remarks
+     * Gets or sets the minimum end time of the interval variable.
      *
-     * **Note:** This function returns the minimum end of the interval in the
-     * model (before the solve), not in the solution.
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntervalMin} to {@link IntervalMax}.
+     *
+     * @see {@link IntervalVar.endMax}, {@link IntervalVar.startMin}, {@link IntervalVar.lengthMin}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * console.log(task.endMin);  // 10 (startMin + length)
+     *
+     * task.endMin = 20;
+     * console.log(task.endMin);  // 20
+     * ```
      */
-    getEndMin() {
-        if (this.isAbsent())
+    get endMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
-        return this._props.endMin ?? IntervalMin;
+        return this._props.endMin ?? 0;
     }
+    set endMin(value) { this._props.endMin = GetInt(value); }
     /**
-     * Returns maximum end assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setEnd} or function {@link setEndMax}.
+     * The maximum end time of the interval variable.
      *
-     * If the interval is absent, the function returns `null`.
+     * @remarks
+     * Gets or sets the maximum end time of the interval variable.
      *
-     * **Note:** This function returns the maximum end of the interval in the
-     * model (before the solve), not in the solution.
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range {@link IntervalMin} to {@link IntervalMax}.
+     *
+     * @see {@link IntervalVar.endMin}, {@link IntervalVar.startMax}, {@link IntervalVar.lengthMax}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * task.endMax = 100;
+     * console.log(task.endMax);  // 100
+     * ```
      */
-    getEndMax() {
-        if (this.isAbsent())
+    get endMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.endMax ?? IntervalMax;
     }
+    set endMax(value) { this._props.endMax = GetInt(value); }
     /**
-     * Returns minimum length assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setLength} or function {@link setLengthMin}.
+     * The minimum length of the interval variable.
      *
-     * If the interval is absent, the function returns `null`.
+     * @remarks
+     * Gets or sets the minimum length of the interval variable.
      *
-     * **Note:** This function returns the minimum length of the interval in the
-     * model (before the solve), not in the solution.
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range 0 to {@link LengthMax}.
+     *
+     * @see {@link IntervalVar.lengthMax}, {@link IntervalVar.startMin}, {@link IntervalVar.endMin}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * console.log(task.lengthMin);  // 10
+     *
+     * task.lengthMin = 5;
+     * console.log(task.lengthMin);  // 5
+     * ```
      */
-    getLengthMin() {
-        if (this.isAbsent())
+    get lengthMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.lengthMin ?? 0;
     }
+    set lengthMin(value) { this._props.lengthMin = GetInt(value); }
     /**
-     * Returns the maximum length assigned to the interval variable during its
-     * construction by {@link Model.intervalVar | Model.intervalVar} or later by
-     * function {@link setLength} or function {@link setLengthMax}.
+     * The maximum length of the interval variable.
      *
-     * If the interval is absent, the function returns `null`.
+     * @remarks
+     * Gets or sets the maximum length of the interval variable.
      *
-     * **Note:** This function returns the maximum length of the interval in the
-     * model (before the solve), not in the solution.
+     * The initial value is set during construction by {@link Model.intervalVar}.
+     * If the interval is absent, the getter returns `None`.
+     *
+     * **Note:** This property reflects the interval's domain in the model
+     * (before the solve), not in the solution.
+     *
+     * The value must be in the range 0 to {@link LengthMax}.
+     *
+     * @see {@link IntervalVar.lengthMin}, {@link IntervalVar.startMax}, {@link IntervalVar.endMax}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     *
+     * console.log(task.lengthMax);  // 10
+     *
+     * task.lengthMax = 20;
+     * console.log(task.lengthMax);  // 20
+     * ```
      */
-    getLengthMax() {
-        if (this.isAbsent())
+    get lengthMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
             return null;
         return this._props.lengthMax ?? LengthMax;
     }
-    // Modifiers for fluent API:
-    /**
-     * Makes the interval variable _optional_.  Optional interval variable can be
-     * _absent_ in the solution i.e. can be omitted.
-     *
-     * It is equivalent to setting `optional: true` in {@link Model.intervalVar | Model.intervalVar}.
-     *
-     * @returns Returns the interval variable itself to allow chaining.
-     *
-     * @see {@link makePresent}, {@link makeAbsent}
-     * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
-     */
-    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; return this; }
-    /**
-     * Makes the interval variable _present_.  The present interval variable cannot be
-     * _absent_ in the solution, i.e., cannot be omitted.
-     *
-     * It is equivalent to setting `optional: false`
-     * in {@link Model.intervalVar | Model.intervalVar}.
-     *
-     * @returns Returns the interval variable itself to allow chaining.
-     *
-     * @see {@link makeOptional}, {@link makeAbsent}
-     * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
-     */
-    makePresent() { this._props.status = undefined; return this; }
-    /**
-     * Makes the interval variable _absent_.  Absent interval variable cannot be
-     * _present_ in the solution, i.e., it will be omitted in the solution (and
-     * everything that depends on it).
-     *
-     * @returns Returns the interval variable itself to allow chaining.
-     *
-     * @see {@link makeOptional}, {@link makePresent}
-     * @see {@link isOptional}, {@link isPresent}, {@link isAbsent}
-     */
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; return this; }
+    set lengthMax(value) { this._props.lengthMax = GetInt(value); }
+    /** @deprecated Use `optional` property instead */
+    isOptional() { return this._props.status === 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
+    /** @deprecated Use `optional` property instead */
+    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    /** @deprecated Use `startMin` property instead */
+    getStartMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.startMin ?? 0;
+    }
+    /** @deprecated Use `startMax` property instead */
+    getStartMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.startMax ?? IntervalMax;
+    }
+    /** @deprecated Use `endMin` property instead */
+    getEndMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.endMin ?? 0;
+    }
+    /** @deprecated Use `endMax` property instead */
+    getEndMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.endMax ?? IntervalMax;
+    }
+    /** @deprecated Use `lengthMin` property instead */
+    getLengthMin() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.lengthMin ?? 0;
+    }
+    /** @deprecated Use `lengthMax` property instead */
+    getLengthMax() {
+        if (this._props.status === 2 /* PresenceStatus.Absent */)
+            return null;
+        return this._props.lengthMax ?? LengthMax;
+    }
+    /** @deprecated Use `optional` property instead */
+    makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
+    /** @deprecated Use `optional` property instead */
+    makePresent() { this._props.status = undefined; }
+    /** @deprecated Use `optional` property instead */
+    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
     setStart(sMin, sMax) {
         this._props.startMin = GetInt(sMin);
         if (sMax === undefined)
             this._props.startMax = sMin;
         else
             this._props.startMax = GetInt(sMax);
-        return this;
     }
-    /**
-     * Sets the minimum start of the interval variable to the given value.
-     *
-     * It overwrites any previous minimum start limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setStart} or {@link setStartMin}.
-     * This function does not change the maximum start.
-     *
-     * Note that the start of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
-     *
-     * @see {@link setStart}, {@link setStartMax}
-     * @see {@link getStartMin}, {@link getStartMax}
-     */
-    setStartMin(sMin) {
-        this._props.startMin = GetInt(sMin);
-        return this;
-    }
-    /**
-     * Sets the maximum start of the interval variable to the given value.
-     *
-     * It overwrites any previous maximum start limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setStart} or {@link setStartMax}.
-     * The minimum start is not changed by this function.
-     *
-     * Note that the start of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
-     *
-     * @see {@link setStart}, {@link setStartMin}
-     * @see {@link getStartMin}, {@link getStartMax}
-     */
-    setStartMax(sMax) {
-        this._props.startMax = GetInt(sMax);
-        return this;
-    }
+    /** @deprecated Use `startMin` property instead */
+    setStartMin(sMin) { this._props.startMin = GetInt(sMin); }
+    /** @deprecated Use `startMax` property instead */
+    setStartMax(sMax) { this._props.startMax = GetInt(sMax); }
     setEnd(eMin, eMax) {
         this._props.endMin = GetInt(eMin);
         if (eMax === undefined)
             this._props.endMax = eMin;
         else
             this._props.endMax = GetInt(eMax);
-        return this;
     }
-    /**
-     * Sets the minimum end of the interval variable to the given value.
-     *
-     * It overwrites any previous minimum end limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setEnd} or {@link setEndMin}.
-     * This function does not change the maximum end.
-     *
-     * Note that the end of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
-     *
-     * @see {@link setEnd}, {@link setEndMax}
-     * @see {@link getEndMin}, {@link getEndMax}
-     */
-    setEndMin(eMin) {
-        this._props.endMin = GetInt(eMin);
-        return this;
-    }
-    /**
-     * Sets the maximum end of the interval variable to the given value.
-     * It overwrites any previous maximum end limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setEnd} or {@link setEndMax}.
-     * This function does not change the minimum end.
-     *
-     * Note that the end of the interval variable must be in the range {@link IntervalMin} to {@link IntervalMax}.
-     *
-     * @see {@link setEnd}, {@link setEndMin}
-     * @see {@link getEndMin}, {@link getEndMax}
-     */
-    setEndMax(eMax) {
-        this._props.endMax = GetInt(eMax);
-        return this;
-    }
+    /** @deprecated Use `endMin` property instead */
+    setEndMin(eMin) { this._props.endMin = GetInt(eMin); }
+    /** @deprecated Use `endMax` property instead */
+    setEndMax(eMax) { this._props.endMax = GetInt(eMax); }
     setLength(lMin, lMax) {
         this._props.lengthMin = GetInt(lMin);
         if (lMax === undefined)
             this._props.lengthMax = lMin;
         else
             this._props.lengthMax = GetInt(lMax);
-        return this;
     }
+    /** @deprecated Use `lengthMin` property instead */
+    setLengthMin(lMin) { this._props.lengthMin = GetInt(lMin); }
+    /** @deprecated Use `lengthMax` property instead */
+    setLengthMax(lMax) { this._props.lengthMax = GetInt(lMax); }
     /**
-     * Sets the minimum length of the interval variable to the given value.
-     * It overwrites any previous minimum length limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setLength} or {@link setLengthMin}.
-     * This function does not change the maximum length.
+     * Creates a Boolean expression which is true if the interval variable is present.
      *
-     * Note that the length of the interval variable must be in the range 0 to {@link LengthMax}.
+     * @returns A Boolean expression that is true if the interval variable is present in the solution.
      *
-     * @see {@link setLength}, {@link setLengthMax}
-     * @see {@link getLengthMin}, {@link getLengthMax}
+     * @remarks
+     * The resulting expression is never *absent*: it is `true` if the interval variable is *present* and `false` if the interval variable is *absent*.
+     *
+     * This function is the same as {@link Model.presence}, see its documentation for more details.
+     *
+     * @example
+     *
+     * In the following example, interval variables `x` and `y` must have the same presence status.
+     * I.e. they must either be both *present* or both *absent*.
+     *
+     * ```ts
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ name: "x", optional: true, length: 10 });
+     * const y = model.intervalVar({ name: "y", optional: true, length: 10 });
+     * model.enforce(x.presence().eq(y.presence()));
+     * ```
+     *
+     * @see {@link Model.presence} is the equivalent function on {@link Model}.
      */
-    setLengthMin(lMin) {
-        this._props.lengthMin = GetInt(lMin);
-        return this;
-    }
-    /**
-     * Sets the maximum length of the interval variable to the given value.
-     * It overwrites any previous maximum length limit given at variable creation by
-     * {@link Model.intervalVar | Model.intervalVar} or later by
-     * {@link setLength} or {@link setLengthMax}.
-     * This function does not change the minimum length.
-     *
-     * Note that the length of the interval must not exceed {@link LengthMax}.
-     *
-     * @see {@link setLength}, {@link setLengthMin}
-     * @see {@link getLengthMin}, {@link getLengthMax}
-     */
-    setLengthMax(lMax) {
-        this._props.lengthMax = GetInt(lMax);
-        return this;
-    }
-    /**
-    * Creates a Boolean expression which is true if the interval variable is present.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.presenceOf | Model.presenceOf}, see its documentation for more details. */
     presence() {
         let outParams = [this._getArg()];
-        return new BoolExpr(this._cp, "intervalPresenceOf", outParams);
+        return BoolExpr._Create(this._cp, "intervalPresenceOf", outParams);
     }
     /**
-    * Creates an integer expression for the start of the interval variable.
-    *
-    * @remarks
-    *
-    * If the interval variable is absent, then the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(x.end().plus(10).le(y.start()));
-    * model.constraint(x.length().le(y.length()));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link Model.startOf} is equivalent function on {@link Model}.
-    * @see Function {@link IntervalVar.startOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
+     * Creates an integer expression for the start time of the interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval variable is absent, then the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(x.end().plus(10).le(y.start()));
+     * model.enforce(x.length().le(y.length()));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link Model.start} is equivalent function on {@link Model}.
+     */
     start() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "startOf", outParams);
+        return IntExpr._Create(this._cp, "startOf", outParams);
     }
     /**
-    * Creates an integer expression for the end of the interval variable.
-    *
-    * @remarks
-    *
-    * If the interval variable is absent, then the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(x.end().plus(10).le(y.start()));
-    * model.constraint(x.length().le(y.length()));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link Model.endOf} is equivalent function on {@link Model}.
-    * @see Function {@link IntervalVar.endOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
+     * Creates an integer expression for the end time of the interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval variable is absent, then the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(x.end().plus(10).le(y.start()));
+     * model.enforce(x.length().le(y.length()));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link Model.end} is equivalent function on {@link Model}.
+     */
     end() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "endOf", outParams);
+        return IntExpr._Create(this._cp, "endOf", outParams);
     }
     /**
-    * Creates an integer expression for the length of the interval variable.
-    *
-    * @remarks
-    *
-    * If the interval variable is absent, then the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(x.end().plus(10).le(y.start()));
-    * model.constraint(x.length().le(y.length()));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link Model.lengthOf} is equivalent function on {@link Model}.
-    * @see Function {@link IntervalVar.lengthOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
+     * Creates an integer expression for the duration (end - start) of the interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval variable is absent, then the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(x.end().plus(10).le(y.start()));
+     * model.enforce(x.length().le(y.length()));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link Model.length} is equivalent function on {@link Model}.
+     */
     length() {
         let outParams = [this._getArg()];
-        return new IntExpr(this._cp, "lengthOf", outParams);
+        return IntExpr._Create(this._cp, "lengthOf", outParams);
     }
     /**
-    * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `interval.start().guard(absentValue)`.
-    *
-    * @see {@link IntervalVar.start}
-    * @see {@link IntExpr.guard}
-    *  */
+     * Creates an integer expression for the start time of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `interval.start().guard(absentValue)`.
+     *
+     * @see {@link IntervalVar.start}
+     * @see {@link IntExpr.guard}
+     */
     startOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        return new IntExpr(this._cp, "startOr", outParams);
+        return IntExpr._Create(this._cp, "startOr", outParams);
     }
     /**
-    * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `interval.end().guard(absentValue)`.
-    *
-    * @see {@link IntervalVar.end}
-    * @see {@link IntExpr.guard}
-    *  */
+     * Creates an integer expression for the end time of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `interval.end().guard(absentValue)`.
+     *
+     * @see {@link IntervalVar.end}
+     * @see {@link IntExpr.guard}
+     */
     endOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        return new IntExpr(this._cp, "endOr", outParams);
+        return IntExpr._Create(this._cp, "endOr", outParams);
     }
     /**
-    * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `interval.length().guard(absentValue)`.
-    *
-    * @see {@link IntervalVar.length}
-    * @see {@link IntExpr.guard}
-    *  */
+     * Creates an integer expression for the duration (end - start) of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `interval.length().guard(absentValue)`.
+     *
+     * @see {@link IntervalVar.length}
+     * @see {@link IntExpr.guard}
+     */
     lengthOr(absentValue) {
         let outParams = [this._getArg(), GetInt(absentValue)];
-        return new IntExpr(this._cp, "lengthOr", outParams);
+        return IntExpr._Create(this._cp, "lengthOr", outParams);
     }
     /** @internal */
     _overlapLength(interval2) {
         let outParams = [this._getArg(), GetIntervalVar(interval2)];
-        return new IntExpr(this._cp, "overlapLength", outParams);
+        return IntExpr._Create(this._cp, "overlapLength", outParams);
     }
     /** @internal */
     _alternativeCost(options, weights) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(options), this._cp._getIntArray(weights)];
-        return new IntExpr(this._cp, "intAlternativeCost", outParams);
+        return IntExpr._Create(this._cp, "intAlternativeCost", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).le(successor.end())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.endBeforeEnd | Model.endBeforeEnd }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).le(successor.end()))
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.endBeforeEnd} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     endBeforeEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "endBeforeEnd", outParams);
+        return Constraint._Create(this._cp, "endBeforeEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).le(successor.start())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.endBeforeStart | Model.endBeforeStart }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).le(successor.start()))
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.endBeforeStart} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     endBeforeStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "endBeforeStart", outParams);
+        return Constraint._Create(this._cp, "endBeforeStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).le(successor.end())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.startBeforeEnd | Model.startBeforeEnd }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).le(successor.end()))
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.startBeforeEnd} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     startBeforeEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "startBeforeEnd", outParams);
+        return Constraint._Create(this._cp, "startBeforeEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).le(successor.start())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.startBeforeStart | Model.startBeforeStart }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).le(successor.start()))
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.startBeforeStart} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     startBeforeStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "startBeforeStart", outParams);
+        return Constraint._Create(this._cp, "startBeforeStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).eq(successor.end())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.endAtEnd | Model.endAtEnd }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).eq(successor.end()))
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.endAtEnd} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     endAtEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "endAtEnd", outParams);
+        return Constraint._Create(this._cp, "endAtEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).eq(successor.start())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.endAtStart | Model.endAtStart }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).eq(successor.start()))
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.endAtStart} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     endAtStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "endAtStart", outParams);
+        return Constraint._Create(this._cp, "endAtStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).eq(successor.end())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.startAtEnd | Model.startAtEnd }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).eq(successor.end()))
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.startAtEnd} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     startAtEnd(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "startAtEnd", outParams);
+        return Constraint._Create(this._cp, "startAtEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Assuming that the current interval is `predecessor`, the constraint is the same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).eq(successor.start())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link Model.startAtStart | Model.startAtStart }      is equivalent function on {@link Model}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Assuming that the current interval is `predecessor`, the constraint is the same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).eq(successor.start()))
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link Model.startAtStart} is equivalent function on {@link Model}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     startAtStart(successor, delay = 0) {
         let outParams = [this._getArg(), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this._cp, "startAtStart", outParams);
+        return Constraint._Create(this._cp, "startAtStart", outParams);
     }
     /**
-    * Creates alternative constraints for the interval variable and provided `options`.
-    *
-    * @param options Interval variables to choose from.
-    *
-    * @remarks
-    *
-    * This constraint is the same as {@link Model.alternative}. */
+     * Creates alternative constraints for the interval variable and provided `options`.
+     *
+     * @param options The interval variables to choose from.
+     *
+     * @returns The alternative constraint.
+     *
+     * @remarks
+     * The alternative constraint requires that exactly one of the `options` intervals
+     * is present when `self` is present. The selected option must have the same
+     * start, end, and length as `self`. If `self` is absent, all options must be absent.
+     *
+     * This is useful for modeling choices, such as assigning a task to one of several
+     * machines, where each option represents the task executed on a different machine.
+     *
+     * This constraint is equivalent to {@link Model.alternative} with `self` as the main interval.
+     */
     alternative(options) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(options)];
-        new Constraint(this._cp, "alternative", outParams);
+        return Constraint._Create(this._cp, "alternative", outParams);
     }
     /**
-    * Constraints the interval variable to span (cover) a set of other interval variables.
-    *
-    * @param covered The set of interval variables to cover.
-    *
-    * @remarks
-    *
-    * This constraint is the same as {@link Model.span}. */
+     * Constrains the interval variable to span (cover) a set of other interval variables.
+     *
+     * @param covered The set of interval variables to cover.
+     *
+     * @returns The span constraint.
+     *
+     * @remarks
+     * The span constraint ensures that `self` exactly covers all present intervals
+     * in `covered`. Specifically, `self` starts at the minimum start time and ends
+     * at the maximum end time of the present covered intervals. If all covered
+     * intervals are absent, `self` must also be absent.
+     *
+     * This is useful for modeling composite tasks or projects where a parent interval
+     * represents the overall duration of multiple sub-tasks.
+     *
+     * This constraint is equivalent to {@link Model.span} with `self` as the spanning interval.
+     */
     span(covered) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(covered)];
-        new Constraint(this._cp, "span", outParams);
+        return Constraint._Create(this._cp, "span", outParams);
     }
     /**
-    * Creates an expression equal to the position of the interval on the sequence.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.position | Model.position}. */
+     * Creates an expression equal to the position of the interval on the sequence.
+     *
+     * @param sequence The sequence variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * Returns an integer expression representing the 0-based position of this interval
+     * in the given sequence. The position reflects the order in which intervals appear
+     * after applying the {@link SequenceVar.noOverlap} constraint.
+     *
+     * If this interval is absent, the position expression is also absent.
+     *
+     * This method is equivalent to {@link Model.position} with `self` as the interval.
+     */
     position(sequence) {
         let outParams = [this._getArg(), GetSequenceVar(sequence)];
-        return new IntExpr(this._cp, "position", outParams);
+        return IntExpr._Create(this._cp, "position", outParams);
     }
     /**
-    * Creates cumulative function (expression) _pulse_ for the interval variable and specified height.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.pulse | Model.pulse}.
-    *  */
+     * Creates cumulative function (expression) pulse for the interval variable and specified height.
+     *
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * **Limitation:** The `height` must be non-negative. Pulses with negative height are not supported.
+     *
+     * This function is the same as {@link Model.pulse}.
+     *
+     * @example
+     * ```ts
+     * let task = model.intervalVar({name: "task", length: 10});
+     * let pulse = task.pulse(5);
+     * ```
+     *
+     * @see {@link Model.pulse} for detailed documentation and examples.
+     */
     pulse(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        return new CumulExpr(this._cp, "pulse", outParams);
+        return CumulExpr._Create(this._cp, "pulse", outParams);
     }
     /**
-    * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.stepAtStart | Model.stepAtStart}.
-    *  */
+     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
+     *
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
+     *
+     * This function is the same as {@link Model.stepAtStart}.
+     *
+     * @example
+     * ```ts
+     * let task = model.intervalVar({name: "task", length: 10});
+     * let step = task.stepAtStart(5);
+     * ```
+     *
+     * @see {@link Model.stepAtStart} for detailed documentation.
+     * @see {@link IntervalVar.stepAtEnd} for the opposite function.
+     */
     stepAtStart(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        return new CumulExpr(this._cp, "stepAtStart", outParams);
+        return CumulExpr._Create(this._cp, "stepAtStart", outParams);
     }
     /**
-    * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.stepAtEnd | Model.stepAtEnd}.
-    *  */
+     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
+     *
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
+     *
+     * This function is the same as {@link Model.stepAtEnd}.
+     *
+     * @example
+     * ```ts
+     * let task = model.intervalVar({name: "task", length: 10});
+     * let step = task.stepAtEnd(5);
+     * ```
+     *
+     * @see {@link Model.stepAtEnd} for detailed documentation.
+     * @see {@link IntervalVar.stepAtStart} for the opposite function.
+     */
     stepAtEnd(height) {
         let outParams = [this._getArg(), GetIntExpr(height)];
-        return new CumulExpr(this._cp, "stepAtEnd", outParams);
+        return CumulExpr._Create(this._cp, "stepAtEnd", outParams);
     }
     /** @internal */
     _precedenceEnergyBefore(others, heights, capacity) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(others), this._cp._getIntArray(heights), GetInt(capacity)];
-        new Constraint(this._cp, "precedenceEnergyBefore", outParams);
+        return Constraint._Create(this._cp, "precedenceEnergyBefore", outParams);
     }
     /** @internal */
     _precedenceEnergyAfter(others, heights, capacity) {
         let outParams = [this._getArg(), this._cp._getIntervalVarArray(others), this._cp._getIntArray(heights), GetInt(capacity)];
-        new Constraint(this._cp, "precedenceEnergyAfter", outParams);
+        return Constraint._Create(this._cp, "precedenceEnergyAfter", outParams);
     }
     /**
-    * Forbid the interval variable to overlap with segments of the function where the value is zero.
-    *
-    * @remarks
-    *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
-    *
-    * @see {@link Model.forbidExtent} for the equivalent function on {@link Model}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero.
+     *
+     * @param func The step function.
+     *
+     * @returns The constraint forbidding the extent (entire interval).
+     *
+     * @remarks
+     * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
+     *
+     * ## Example
+     *
+     * A production task that cannot overlap with scheduled maintenance windows:
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 3-hour production run
+     * const production = model.intervalVar({ length: 3, name: "production" });
+     *
+     * // Machine availability: 1 = available, 0 = under maintenance
+     * const availability = model.stepFunction([
+     *     [0, 1],   // Initially available
+     *     [8, 0],   // 8h: maintenance starts
+     *     [10, 1],  // 10h: maintenance ends
+     * ]);
+     *
+     * // Production cannot overlap periods where availability is 0
+     * production.forbidExtent(availability);
+     * model.minimize(production.end());
+     *
+     * const result = await model.solve();
+     * // Production runs [0, 3) - finishes before maintenance window
+     * ```
+     *
+     * @see {@link Model.forbidExtent} for the equivalent function on {@link Model}.
+     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidExtent(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        new Constraint(this._cp, "forbidExtent", outParams);
+        return Constraint._Create(this._cp, "forbidExtent", outParams);
     }
     /**
-    * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
-    *
-    * @remarks
-    *
-    * This function is equivalent to:
-    *
-    * ```
-    *   model.constraint(func.stepFunctionEval(interval.start()).ne(0));
-    * ```
-    *
-    * I.e., the function value at the start of the interval variable cannot be zero.
-    *
-    * @see {@link Model.forbidStart} for the equivalent function on {@link Model}.
-    * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * Constrains the start of an interval variable to not coincide with zero segments of a step function.
+     *
+     * @param func The step function whose zero segments define forbidden start times.
+     *
+     * @returns The constraint forbidding the start point.
+     *
+     * @remarks
+     * This function is equivalent to:
+     *
+     * ```ts
+     *   model.enforce(func.eval(interval.start()).ne(0))
+     * ```
+     *
+     * I.e., the function value at the start of the interval variable cannot be zero.
+     *
+     * ## Example
+     *
+     * A factory task that can only start during work hours (excluding breaks):
+     *
+     * @see {@link Model.forbidStart} for the equivalent function on {@link Model}.
+     * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidStart(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        new Constraint(this._cp, "forbidStart", outParams);
+        return Constraint._Create(this._cp, "forbidStart", outParams);
     }
     /**
-    * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
-    *
-    * @remarks
-    *
-    * This function is equivalent to:
-    *
-    * ```
-    *   model.constraint(func.stepFunctionEval(interval.end()).ne(0));
-    * ```
-    *
-    * I.e., the function value at the end of the interval variable cannot be zero.
-    *
-    * @see {@link Model.forbidEnd} for the equivalent function on {@link Model}.
-    * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * Constrains the end of an interval variable to not coincide with zero segments of a step function.
+     *
+     * @param func The step function whose zero segments define forbidden end times.
+     *
+     * @returns The constraint forbidding the end point.
+     *
+     * @remarks
+     * This function is equivalent to:
+     *
+     * ```ts
+     *   model.enforce(func.eval(interval.end()).ne(0))
+     * ```
+     *
+     * I.e., the function value at the end of the interval variable cannot be zero.
+     *
+     * ## Example
+     *
+     * A delivery task that must complete during business hours (not during lunch break):
+     *
+     * @see {@link Model.forbidEnd} for the equivalent function on {@link Model}.
+     * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidEnd(func) {
         let outParams = [this._getArg(), GetIntStepFunction(func)];
-        new Constraint(this._cp, "forbidEnd", outParams);
+        return Constraint._Create(this._cp, "forbidEnd", outParams);
     }
     /** @internal */
     _disjunctiveIsBefore(y) {
         let outParams = [this._getArg(), GetIntervalVar(y)];
-        return new BoolExpr(this._cp, "disjunctiveIsBefore", outParams);
+        return BoolExpr._Create(this._cp, "disjunctiveIsBefore", outParams);
     }
     /** @internal */
     _related(y) {
         let outParams = [this._getArg(), GetIntervalVar(y)];
-        return new Directive(this._cp, "related", outParams);
+        return Directive._Create(this._cp, "related", outParams);
     }
 }
 // TODO:2 When we have other constraints on sequenceVar then add links into the following doc.
 /**
+ * @remarks
  * Models a sequence (order) of interval variables.
  *
- * Sequence variable is used with {@link noOverlap} constraint
- * to ensure that some interval variables do not overlap.
- * Such no-overlapping set of interval variables will form a sequence in the solution.
- * The sequence variable captures this order of interval variables
- * and allows additional constraints on the order to be stated.
+ * A sequence variable represents an ordered arrangement of interval variables
+ * where no two intervals overlap. The sequence captures not just that the intervals
+ * don't overlap, but also their relative ordering in the solution.
  *
- * @see {@link Model.position}.
+ * Sequence variables are created using {@link Model.sequenceVar} and are typically
+ * used with the {@link SequenceVar.noOverlap} constraint to enforce non-overlapping
+ * with optional transition times between intervals.
+ *
+ * The position of each interval in the sequence can be queried using
+ * {@link Model.position} or {@link IntervalVar.position}, which returns an integer
+ * expression representing the interval's index in the final ordering (0-based).
+ * Absent intervals have an absent position.
+ *
+ * @see {@link Model.sequenceVar} to create sequence variables.
+ * @see {@link SequenceVar.noOverlap} for the no-overlap constraint with transitions.
+ * @see {@link Model.position} to get an interval's position in the sequence.
  *
  * @group Modeling
  */
-export class SequenceVar extends ModelNode {
-    #isSequenceVar;
+export class SequenceVar extends ModelElement {
     /** @internal */
-    constructor(cp, func, args) {
-        super(cp, func, args);
-        this._forceRef();
+    static _Create(cp, func, args) {
+        const instance = Object.create(SequenceVar.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: cp._getNewRefId(instance._props) };
+        return instance;
     }
+    // @internal Optimized version (ref is always set):
+    _getArg() { return this._arg; }
     /** @internal */
     _makeAuxiliary() { this._props.func = "_sequenceVar"; }
     /**
      * Constrain the interval variables forming the sequence to not overlap.
      *
-     * @param transitions 2D square array of minimum transition distances the intervals.
-     *                    The first index is the type (index) of the first interval
-     *                    in the sequence, the second index is the type (index) of the
-     *                    second interval in the sequence.
+     * @param transitions (Optional) 2D square array of minimum transition distances between the intervals. The first index is the type (index) of the first interval in the sequence, the second index is the type (index) of the second interval in the sequence
+     *
+     * @returns The no-overlap constraint.
      *
      * @remarks
-     *
      * The `noOverlap` constraint makes sure that the intervals in the sequence
      * do not overlap.  That is, for every pair of interval variables `x` and `y`
      * at least one of the following conditions must hold (in a solution):
      *
-     * 1. Interval variable `x` is _absent_. This means that the interval is not
-     *    present in the solution (not performed), so it cannot overlap
-     *    with any other interval. Only optional interval variables can be _absent_.
-     * 2. Interval variable `y` is _absent_.
+     * 1. Interval variable `x` is *absent*. This means that the interval is not
+     * present in the solution (not performed), so it cannot overlap
+     * with any other interval. Only optional interval variables can be *absent*.
+     * 2. Interval variable `y` is *absent*.
      * 3. `x` ends before `y` starts, i.e. `x.end()` is less or equal to `y.start()`.
      * 4. `y` ends before `x` starts, i.e. `y.end()` is less or equal to `x.start()`.
      *
@@ -1887,9 +3057,9 @@ export class SequenceVar extends ModelNode {
      * 4. `y.end() + transitions[y.type][x.type]` is less or equal to `x.start()`.
      *
      * where `x.type` and `y.type` are the types of the interval variables `x` and `y`
-     * as given in {@link Model.sequenceVar | Model.sequenceVar}. If types were not specified,
+     * as given in {@link Model.sequenceVar}. If types were not specified,
      * then they are equal to the indices of the interval variables in the array
-     * passed to {@link Model.sequenceVar | Model.sequenceVar}. Transition times
+     * passed to {@link Model.sequenceVar}. Transition times
      * cannot be negative.
      *
      * Note that transition times are enforced between every pair of interval variables,
@@ -1898,12 +3068,8 @@ export class SequenceVar extends ModelNode {
      * The size of the 2D array `transitions` must be equal to the number of types
      * of the interval variables.
      *
-     * This constraint is the same as
-     * {@link Model.noOverlap | Model.noOverlap(sequenceVar, ..)}.
-     * Constraint
-     * {@link Model.noOverlap | Model.noOverlap(intervalVarVar[], ..)}
-     * is also the same but specifies the intervals directly instead of using
-     * a sequence variable.
+     * This constraint is equivalent to {@link Model.noOverlap} called with the
+     * sequence variable's intervals and types.
      *
      * @example
      *
@@ -1911,7 +3077,7 @@ export class SequenceVar extends ModelNode {
      *
      * * `length` of the task (how long it takes to perform it),
      * * `location` of the task (where it must be performed),
-     * * a time window `startMin` to `endMax` when the task must be performed.
+     * * a time window `earliest` to `deadline` when the task must be performed.
      *
      * There are three locations, `0`, `1`, and `2`. The minimum travel times between
      * the locations are given by a transition matrix `transitions`. Transition times
@@ -1929,51 +3095,52 @@ export class SequenceVar extends ModelNode {
      * ];
      * // Tasks to be scheduled:
      * const tasks = [
-     *   {location: 0, length: 20, startMin: 0, endMax: 100},
-     *   {location: 0, length: 40, startMin: 70, endMax: 200},
-     *   {location: 1, length: 10, startMin: 0, endMax: 200},
-     *   {location: 1, length: 30, startMin: 100, endMax: 200},
-     *   {location: 1, length: 10, startMin: 0, endMax: 150},
-     *   {location: 2, length: 15, startMin: 50, endMax: 250},
-     *   {location: 2, length: 10, startMin: 20, endMax: 60},
-     *   {location: 2, length: 20, startMin: 110, endMax: 250},
+     *   {location: 0, length: 20, earliest: 0, deadline: 100},
+     *   {location: 0, length: 40, earliest: 70, deadline: 200},
+     *   {location: 1, length: 10, earliest: 0, deadline: 200},
+     *   {location: 1, length: 30, earliest: 100, deadline: 200},
+     *   {location: 1, length: 10, earliest: 0, deadline: 150},
+     *   {location: 2, length: 15, earliest: 50, deadline: 250},
+     *   {location: 2, length: 10, earliest: 20, deadline: 60},
+     *   {location: 2, length: 20, earliest: 110, deadline: 250},
      * ];
-  
+     *
      * let model = new CP.Model;
-  
+     *
      * // From the array tasks create an array of interval variables:
      * let taskVars = tasks.map((t, i) => model.intervalVar(
-     *   { name: "Task" + i, length: t.length, start: [t.startMin,], end: [, t.endMax] }
+     *   { name: "Task" + i, length: t.length, start: [t.earliest,], end: [, t.deadline] }
      * ));
      * // And an array of locations:
      * let types = tasks.map(t => t.location);
-  
+     *
      * // Create the sequence variable for the tasks, location is the type:
      * let sequence = model.sequenceVar(taskVars, types);
      * // Tasks must not overlap and transitions must be respected:
      * sequence.noOverlap(transitions);
-  
+     *
      * // Solve the model:
-     * let result = await CP.solve(model, { solutionLimit: 1 });
-      ```
+     * let result = await model.solve({ solutionLimit: 1 });
+     * ```
      */
     noOverlap(transitions) {
-        this._noOverlap(transitions);
+        return this._noOverlap(transitions);
     }
     /** @internal */
     _noOverlap(transitions) {
         let outParams = [this._getArg()];
         if (transitions !== undefined)
             outParams.push(this._cp._getIntMatrix(transitions));
-        new Constraint(this._cp, "noOverlap", outParams);
+        return Constraint._Create(this._cp, "noOverlap", outParams);
     }
     /** @internal */
     _sameSequence(sequence2) {
         let outParams = [this._getArg(), GetSequenceVar(sequence2)];
-        new Constraint(this._cp, "sameSequence", outParams);
+        return Constraint._Create(this._cp, "sameSequence", outParams);
     }
 }
 /**
+ * @remarks
  * Cumulative expression.
  *
  * Cumulative expression represents resource usage over time.  The resource
@@ -1989,105 +3156,155 @@ export class SequenceVar extends ModelNode {
  *   number of workers during its execution.  At the beginning of the interval,
  *   the resource usage increases by a given amount, and at the end of the
  *   interval, the resource usage decreases by the same amount.
- *   Pulse can be created by function {@link Model.pulse | Model.pulse}
- *   or {@link IntervalVar.pulse | IntervalVar.pulse }.
+ *   Pulse can be created by function {@link Model.pulse}
+ *   or {@link IntervalVar.pulse}.
  * * ***Step***: a given amount of resource is consumed or produced at a specified
  *   time (e.g., at the start of an interval variable).
  *   Steps may represent an inventory of a material that is
  *   consumed or produced by some tasks (a _reservoir_).
  *   Steps can be created by functions
- *   {@link Model.stepAtStart | Model.stepAtStart},
- *   {@link IntervalVar.stepAtStart | IntervalVar.stepAtStart},
- *   {@link Model.stepAtEnd | Model.stepAtEnd},
- *   {@link IntervalVar.stepAtEnd | IntervalVar.stepAtEnd}. and
- *   {@link Model.stepAt | Model.stepAt}.
+ *   {@link Model.stepAtStart},
+ *   {@link IntervalVar.stepAtStart},
+ *   {@link Model.stepAtEnd},
+ *   {@link IntervalVar.stepAtEnd}. and
+ *   {@link Model.stepAt}.
  *
  * Cumulative expressions can be combined using
- * {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link cumulNeg} and
- * {@link Model.cumulSum}.  The resulting cumulative expression represents
+ * {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link CumulExpr.neg} and
+ * {@link Model.cumulSum}. The resulting cumulative expression represents
  * a sum of the resource usage of the combined expressions.
  *
  * Cumulative expressions can be constrained by {@link Model.cumulGe} and
  * {@link Model.cumulLe} constraints to specify the minimum and maximum
  * allowed resource usage.
  *
+ * **Limitations:**
+ *
+ * * Pulse-based and step-based cumulative expressions cannot be mixed.
+ * * Pulses cannot have negative height. Use `-` and unary `-` only with step-based expressions.
+ *
  * See {@link Model.cumulLe} and {@link Model.cumulGe} for examples.
  *
  * @group Modeling
  */
-export class CumulExpr extends ModelNode {
-    #isCumulExpr;
-    /**
-    * Addition of two cumulative expressions.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.plus | Model.plus}.
-    *  */
+export class CumulExpr extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(CumulExpr.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
+    /** @deprecated Use `CumulExpr.plus` instead. */
     cumulPlus(rhs) {
-        let outParams = [this._getArg(), GetCumulExpr(rhs)];
-        return new CumulExpr(this._cp, "cumulPlus", outParams);
+        return this.plus(rhs);
     }
-    /**
-    * Subtraction of two cumulative expressions.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.minus | Model.minus}.
-    *  */
+    /** @deprecated Use `CumulExpr.minus` instead. */
     cumulMinus(rhs) {
-        let outParams = [this._getArg(), GetCumulExpr(rhs)];
-        return new CumulExpr(this._cp, "cumulMinus", outParams);
+        return this.minus(rhs);
     }
-    /**
-    * Negation of a cumulative expression.
-    *
-    * @remarks
-    *
-    * This function is the same as {@link Model.neg | Model.neg}.
-    *  */
-    cumulNeg() {
-        let outParams = [this._getArg()];
-        return new CumulExpr(this._cp, "cumulNeg", outParams);
-    }
-    /**
-    * Constraints the cumulative function to be everywhere less or equal to `maxCapacity`.
-    *
-    * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
-    * See {@link Model.pulse} for an example with `cumulLe`.
-    *
-    * @see {@link Model.cumulLe | Model.cumulLe} for the equivalent function on {@link Model}.
-    * @see {@link Model.cumulGe} for the opposite constraint.
-    *  */
+    /** @deprecated Use `CumulExpr.le` instead. */
     cumulLe(maxCapacity) {
-        let outParams = [this._getArg(), GetInt(maxCapacity)];
-        new Constraint(this._cp, "cumulLe", outParams);
+        return this.le(maxCapacity);
+    }
+    /** @deprecated Use `CumulExpr.ge` instead. */
+    cumulGe(minCapacity) {
+        return this.ge(minCapacity);
+    }
+    /** @deprecated Use `CumulExpr.neg` instead. */
+    cumulNeg() {
+        return this.neg();
     }
     /**
-    * Constraints the cumulative function to be everywhere greater or equal to `minCapacity`.
-    *
-    * This function can be used to specify the minimum limit of resource usage at any time. For example to make sure that there is never less than zero material on stock.
-    * See {@link Model.stepAtStart} for an example with `cumulGe`.
-    *
-    * @see {@link Model.cumulGe | Model.cumulGe} for the equivalent function on {@link Model}.
-    * @see {@link Model.cumulLe} for the opposite constraint.
-    *  */
-    cumulGe(minCapacity) {
+     * Addition of two cumulative expressions.
+     *
+     * @param rhs The right-hand side cumulative expression.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * This function is the same as {@link Model.plus}.
+     */
+    plus(rhs) {
+        let outParams = [this._getArg(), GetCumulExpr(rhs)];
+        return CumulExpr._Create(this._cp, "cumulPlus", outParams);
+    }
+    /**
+     * Subtraction of two cumulative expressions.
+     *
+     * @param rhs The right-hand side cumulative expression.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * This function is the same as {@link Model.minus}.
+     */
+    minus(rhs) {
+        let outParams = [this._getArg(), GetCumulExpr(rhs)];
+        return CumulExpr._Create(this._cp, "cumulMinus", outParams);
+    }
+    /**
+     * Negation of a cumulative expression.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * This function is the same as {@link Model.neg}.
+     */
+    neg() {
+        let outParams = [this._getArg()];
+        return CumulExpr._Create(this._cp, "cumulNeg", outParams);
+    }
+    /**
+     * Constrains the cumulative function to be everywhere less or equal to `maxCapacity`.
+     *
+     * @param maxCapacity The maximum capacity value.
+     *
+     * @returns The constraint object
+     *
+     * @remarks
+     * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
+     * See {@link Model.pulse} for an example with `le`.
+     *
+     * @see {@link Model.le} for the equivalent function on {@link Model}.
+     * @see {@link Model.ge} for the opposite constraint.
+     */
+    le(maxCapacity) {
+        let outParams = [this._getArg(), GetInt(maxCapacity)];
+        return Constraint._Create(this._cp, "cumulLe", outParams);
+    }
+    /**
+     * This function can be used to specify the minimum limit of resource usage at any time. `minCapacity`.
+     *
+     * @param minCapacity The minimum capacity value.
+     *
+     * @returns The constraint object
+     *
+     * @remarks
+     * This function can be used to specify the minimum limit of resource usage at any time. For example to make sure that there is never less than zero material on stock.
+     * See {@link Model.stepAtStart} for an example with `ge`.
+     *
+     * @see {@link Model.ge} for the equivalent function on {@link Model}.
+     * @see {@link Model.le} for the opposite constraint.
+     */
+    ge(minCapacity) {
         let outParams = [this._getArg(), GetInt(minCapacity)];
-        new Constraint(this._cp, "cumulGe", outParams);
+        return Constraint._Create(this._cp, "cumulGe", outParams);
     }
     /** @internal */
     _cumulMaxProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
-        new Constraint(this._cp, "cumulMaxProfile", outParams);
+        return Constraint._Create(this._cp, "cumulMaxProfile", outParams);
     }
     /** @internal */
     _cumulMinProfile(profile) {
         let outParams = [this._getArg(), GetIntStepFunction(profile)];
-        new Constraint(this._cp, "cumulMinProfile", outParams);
+        return Constraint._Create(this._cp, "cumulMinProfile", outParams);
     }
 }
 /**
+ * @remarks
  * Integer step function.
  *
  * Integer step function is a piecewise constant function defined on integer
@@ -2096,69 +3313,86 @@ export class CumulExpr extends ModelNode {
  *
  * Step functions can be used in the following ways:
  *
- *   * Function {@link Model.stepFunctionEval} evaluates the function at the given point (given as {@link IntExpr}).
- *   * Function {@link Model.stepFunctionSum} computes a sum (integral) of the function over an {@link IntervalVar}.
- *   * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
- *   * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
+ * * Function {@link Model.eval} evaluates the function at the given point (given as {@link IntExpr}).
+ * * Function {@link Model.integral} computes a sum (integral) of the function over an {@link IntervalVar}.
+ * * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
+ * * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
  *
  * @group Modeling
  */
-export class IntStepFunction extends ModelNode {
-    #isStepFunction;
+export class IntStepFunction extends ModelElement {
     /** @internal */
-    constructor(cp, values) {
-        super(cp, "intStepFunction", []);
+    static _CreateWithValues(cp, values) {
+        const instance = Object.create(IntStepFunction.prototype);
+        instance._cp = cp;
+        instance._props = { func: "intStepFunction", args: [] };
+        instance._arg = { arg: undefined, ref: undefined };
         // Copy the array so that the user cannot change it later.
-        this._props.values = Array.from(values, v => {
-            assert(Array.isArray(v) && v.length == 2 && Number.isInteger(v[0]) && Number.isInteger(v[1]), "Step function item is not i the form [integer, integer].");
+        instance._props.values = Array.from(values, v => {
+            assert(Array.isArray(v) && v.length === 2 && Number.isInteger(v[0]) && Number.isInteger(v[1]), "Step function item is not in the form [integer, integer].");
             return Array.from(v);
         });
+        return instance;
     }
     /**
-    * Computes sum of values of the step function over the interval `interval`.
-    *
-    * @remarks
-    *
-    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. The sum includes the function value at the start time but not the value at the end time. If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is `absent`.
-    *
-    * **Requirement**: The step function `func` must be non-negative.
-    *
-    * @see {@link Model.stepFunctionSum | Model.stepFunctionSum} for the equivalent function on {@link Model}.
-    *  */
-    stepFunctionSum(interval) {
+     * Computes sum of values of the step function over the interval `interval`.
+     *
+     * @param interval The interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The sum is computed over all integer time points from `interval.start()` to `interval.end()-1` inclusive. In other words, the sum includes the function value at the start time but excludes the value at the end time (half-open interval). If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is *absent*.
+     *
+     * **Requirement**: The step function `func` must be non-negative.
+     *
+     * @see {@link Model.integral} for the equivalent function on {@link Model}.
+     */
+    integral(interval) {
         let outParams = [this._getArg(), GetIntervalVar(interval)];
-        return new IntExpr(this._cp, "intStepFunctionSum", outParams);
+        return IntExpr._Create(this._cp, "intStepFunctionIntegral", outParams);
     }
     /** @internal */
-    _stepFunctionSumInRange(interval, lb, ub) {
+    _stepFunctionIntegralInRange(interval, lb, ub) {
         let outParams = [this._getArg(), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
-        new Constraint(this._cp, "intStepFunctionSumInRange", outParams);
+        return Constraint._Create(this._cp, "intStepFunctionIntegralInRange", outParams);
     }
     /**
-    * Evaluates the step function at a given point.
-    *
-    * @remarks
-    *
-    * The result is the value of the step function at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
-    *
-    * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
-    *
-    * @see {@link Model.stepFunctionEval} for the equivalent function on {@link Model}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} are convenience functions built on top of `stepFunctionEval`.
-    *  */
-    stepFunctionEval(arg) {
+     * Evaluates the step function at a given point.
+     *
+     * @param arg The point at which to evaluate the step function.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The result is the value of the step function at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
+     *
+     * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
+     *
+     * @see {@link Model.eval} for the equivalent function on {@link Model}.
+     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} are convenience functions built on top of `eval`.
+     */
+    eval(arg) {
         let outParams = [this._getArg(), GetIntExpr(arg)];
-        return new IntExpr(this._cp, "intStepFunctionEval", outParams);
+        return IntExpr._Create(this._cp, "intStepFunctionEval", outParams);
     }
     /** @internal */
     _stepFunctionEvalInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        new Constraint(this._cp, "intStepFunctionEvalInRange", outParams);
+        return Constraint._Create(this._cp, "intStepFunctionEvalInRange", outParams);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(arg, lb, ub) {
         let outParams = [this._getArg(), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        new Constraint(this._cp, "intStepFunctionEvalNotInRange", outParams);
+        return Constraint._Create(this._cp, "intStepFunctionEvalNotInRange", outParams);
+    }
+    /** @deprecated Use `IntStepFunction.integral` instead. */
+    stepFunctionSum(interval) {
+        return this.integral(interval);
+    }
+    /** @deprecated Use `IntStepFunction.eval` instead. */
+    stepFunctionEval(x) {
+        return this.eval(x);
     }
 }
 /** @internal */
@@ -2167,12 +3401,15 @@ function GetIntStepFunction(arg) {
     return arg._getArg();
 }
 /** @internal */
-class IntervalExpr extends ModelNode {
-    #isIntervalExpr;
-}
-/** @internal */
-class SearchDecision extends ModelNode {
-    #isSearchDecision;
+class SearchDecision extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(SearchDecision.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
 }
 // === Verification functions ================================================
 /** @internal */
@@ -2180,12 +3417,6 @@ function GetInt(arg) {
     if (TYPE_CHECK_LEVEL >= 1)
         assert(Number.isInteger(arg));
     return arg;
-}
-/** @internal */
-function GetIntFromUnknown(arg) {
-    if (TYPE_CHECK_LEVEL >= 2)
-        assert(typeof (arg) === 'number');
-    return GetInt(arg);
 }
 /** @internal */
 function GetFloat(arg) {
@@ -2196,7 +3427,7 @@ function GetFloat(arg) {
 /** @internal */
 function GetBool(arg) {
     if (TYPE_CHECK_LEVEL >= 2)
-        assert(typeof arg == 'boolean');
+        assert(typeof arg === 'boolean');
     return arg;
 }
 /** @internal */
@@ -2214,17 +3445,15 @@ function VerifyArrayInstanceOf(arg, Class) {
 }
 /** @internal */
 function GetFloatExpr(arg) {
-    if (typeof arg == 'number' || typeof arg == 'boolean')
+    if (typeof arg === 'number')
         return arg;
     VerifyInstanceOf(arg, FloatExpr);
     return arg._getArg();
 }
 /** @internal */
 function GetIntExpr(arg) {
-    if (typeof arg == 'number')
+    if (typeof arg === 'number')
         return GetInt(arg);
-    if (typeof arg == 'boolean')
-        return arg;
     VerifyInstanceOf(arg, IntExpr);
     return arg._getArg();
 }
@@ -2236,14 +3465,14 @@ function GetSafeArg(arg) {
 }
 /** @internal */
 function GetBoolExpr(arg) {
-    if (typeof (arg) == 'boolean')
+    if (typeof (arg) === 'boolean')
         return arg;
     VerifyInstanceOf(arg, BoolExpr);
     return arg._getArg();
 }
 /** @internal */
 function GetConstraint(arg) {
-    if (typeof (arg) == 'boolean')
+    if (typeof (arg) === 'boolean')
         return arg;
     if (TYPE_CHECK_LEVEL >= 2)
         assert(arg instanceof BoolExpr || arg instanceof Constraint);
@@ -2265,14 +3494,8 @@ function GetSequenceVar(arg) {
     return arg._getArg();
 }
 /** @internal */
-function IsBoolExpr(arg) {
-    if (typeof (arg) == "boolean")
-        return arg;
-    return arg instanceof BoolExpr;
-}
-/** @internal */
 function IsIntExpr(arg) {
-    if (typeof (arg) == "number")
+    if (typeof (arg) === "number")
         return Number.isInteger(arg);
     return arg instanceof IntExpr;
 }
@@ -2286,30 +3509,20 @@ function IsIntArray(arg) {
     return true;
 }
 /** @internal */
-function IsIntExprArray(arg) {
-    if (!Array.isArray(arg))
-        return false;
-    for (const item of arg)
-        if (!IsIntExpr(item))
-            return false;
-    return true;
-}
-/** @internal */
-function IsCumulExprArray(arg) {
-    if (!Array.isArray(arg))
-        return false;
-    for (const item of arg)
-        if (!(item instanceof CumulExpr))
-            return false;
-    return true;
+function IsIterable(obj) {
+    return obj !== null && obj !== undefined && typeof obj[Symbol.iterator] === 'function';
 }
 /**
+ * Creates a deep copy of the input Parameters object.
+ *
+ * @param params The Parameters object to copy
+ *
+ * @returns A deep copy of the input Parameters object.
+ *
+ * @remarks
  * This function creates a deep copy of the input {@link Parameters} object.
  * Afterwards, the copy can be modified without affecting
  * the original {@link Parameters} object.
- *
- * @param params The {@link Parameters} object to copy.
- * @returns A deep copy of the input {@link Parameters} object.
  *
  * @group Parameters
  */
@@ -2326,13 +3539,14 @@ export function copyParameters(params) {
     return copy;
 }
 /**
- * Combines two {@link Parameters} settings into a new one.
+ * Combines two Parameters settings into a new one.
  *
- * @param source Input parameters that can be modified by `modifications`.
- * @param modifications Parameters that will overwrite the parameters from `source`.
+ * @param source Input parameters that can be modified by modifications
+ * @param modifications Parameters that will overwrite the parameters from source
+ *
+ * @returns The combined parameters object
  *
  * @remarks
- *
  * The new object contains all parameters from both inputs.  If the same
  * parameter is specified in both input objects, then the value from the second
  * object `modifications` is used.
@@ -2349,10 +3563,11 @@ export function combineParameters(source, modifications) {
         result[key] = modifications[key];
     }
     if (modifications.workers !== undefined) {
-        if (result.workers === undefined)
-            result.workers = [];
-        for (const i in modifications.workers) {
-            let w = modifications.workers[i];
+        result.workers ??= [];
+        for (let i = 0; i < modifications.workers.length; i++) {
+            const w = modifications.workers[i];
+            if (w === undefined)
+                continue;
             if (result.workers[i] === undefined)
                 result.workers[i] = { ...w };
             else
@@ -2375,7 +3590,8 @@ Terminal output:\n\
 \n\
 Major options:\n\
   --nbWorkers uint32               Number of threads dedicated to search\n\
-  --searchType LNS|FDS|FDSLB|SetTimes\n\
+  --preset Auto|Default|Large      Preset configuration for solver parameters\n\
+  --searchType Auto|LNS|FDS|FDSDual|SetTimes|FDSLB\n\
                                    Type of search to use\n\
   --randomSeed uint32              Random seed\n\
   --logLevel uint32                Level of the log\n\
@@ -2384,6 +3600,7 @@ Major options:\n\
   --verifySolutions bool           When on, the correctness of solutions is verified\n\
   --verifyExternalSolutions bool   Whether to verify corectness of external solutions\n\
   --allocationBlockSize uint32     The minimal amount of memory in kB for a single allocation\n\
+  --processExitTimeout double      Timeout for solver process to exit after finishing\n\
 \n\
 Limits:\n\
   --timeLimit double               Wall clock limit for execution\n\
@@ -2393,10 +3610,6 @@ Gap Tolerance:\n\
   --absoluteGapTolerance double    Stop the search when the gap is below the tolerance\n\
   --relativeGapTolerance double    Stop the search when the gap is below the tolerance\n\
 \n\
-Tuning:\n\
-  --tagsFromNames Never|Auto|Merge|Force\n\
-                                   Whether to derive tags from names\n\
-\n\
 Propagation levels:\n\
   --noOverlapPropagationLevel uint32\n\
                                    How much to propagate noOverlap constraints\n\
@@ -2405,12 +3618,9 @@ Propagation levels:\n\
                                    How much to propagate constraints on cumul functions\n\
   --positionPropagationLevel uint32\n\
                                    How much to propagate position expressions on noOverlap constraints\n\
-  --stepFunctionSumPropagationLevel uint32\n\
+  --integralPropagationLevel uint32\n\
                                    How much to propagate stepFunctionSum expression\n\
   --usePrecedenceEnergy uint32     Whether to use precedence energy propagation algorithm\n\
-  --packPropagationLevel uint32    How much to propagate pack constraints\n\
-  --itvMappingPropagationLevel uint32\n\
-                                   How much to propagate itvMapping constraint\n\
 \n\
 Failure-Directed Search:\n\
   --fdsInitialRating double        Initial rating for newly created choices\n\
@@ -2455,9 +3665,9 @@ Failure-Directed Search:\n\
   --fdsBranchOnObjective bool      Whether to generate choices for objective expression/variable\n\
   --fdsBranchOrdering FailureFirst|FailureLast|Random\n\
                                    Controls which side of a choice is is explored first (considering the rating).\n\
-  --fdsLBStrategy Minimum|Random|Split\n\
-                                   A strategy to choose objective cuts during FDSLB search.\n\
-  --fdsLBResetRatings bool         Whether to reset ratings when a new LB is proved\n\
+  --fdsDualStrategy Minimum|Random|Split\n\
+                                   A strategy to choose objective cuts during FDSDual search.\n\
+  --fdsDualResetRatings bool       Whether to reset ratings when a new LB is proved\n\
 \n\
 Large Neighborhood Search:\n\
   --lnsUseWarmStartOnly bool       Use only the user-provided warm start as the initial solution in LNS\n\
@@ -2480,7 +3690,7 @@ function handleHelp(args, params, help) {
     if (args.includes("--version")) {
         if (params.version)
             console.log(params.version);
-        let solverPath = calcSolverPath({});
+        let solverPath = Solver.findSolver({});
         spawnSync(solverPath, ["--version"], { stdio: "inherit", windowsHide: true });
         console.log("OptalCP JavaScript API " + Version);
         console.log("Solver path: '" + solverPath + "'");
@@ -2488,15 +3698,14 @@ function handleHelp(args, params, help) {
     }
 }
 /**
- * Parses command-line solver parameters and returns a {@link Parameters} object.
+ * Parses command-line solver parameters and returns a Parameters object.
  *
- * @param params The default parameters.  The function will overwrite the
- *              parameters with values specified on the command line.
- * @param args  The command-line arguments to parse.  If not specified then
- *             `process.argv.slice(2)` is used.
+ * @param params (Optional) The default parameters. The function will overwrite the parameters with values specified on the command line
+ * @param args (Optional) The command-line arguments to parse. If not specified then process.argv.slice(2) is used
+ *
+ * @returns The parsed parameters object
  *
  * @remarks
- *
  * For a command-line-oriented application, it is helpful to specify solver parameters
  * using command-line arguments.  This function parses command-line arguments and
  * returns a {@link Parameters} object.
@@ -2525,7 +3734,7 @@ function handleHelp(args, params, help) {
  *
  * Major options:
  *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSLB|SetTimes
+ *   --searchType LNS|FDS|FDSDual|SetTimes
  *                                    Type of search to use
  *   --randomSeed uint32              Random seed
  *   --logLevel uint32                Level of the log
@@ -2542,8 +3751,8 @@ function handleHelp(args, params, help) {
  *
  * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
  *
- *  * `--workerN.` or `--workersN.` for worker `N`
- *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ * * `--workerN.` or `--workersN.` for worker `N`
+ * * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
  *
  * For example:
  *
@@ -2551,11 +3760,12 @@ function handleHelp(args, params, help) {
  * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
- * @see This function does not accept any unrecognized arguments. See function
  * {@link parseSomeParameters} to handle unrecognized arguments differently.
  *
- * @see See {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
- *    functions that parse {@link BenchmarkParameters}.
+ * functions that parse {@link BenchmarkParameters}.
+ *
+ * This function does not accept any unrecognized arguments.
+ * @see See functions {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for parsing benchmark parameters.
  *
  * @group Parameters
  */
@@ -2568,14 +3778,12 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
 /**
  * Parses command-line solver parameters and returns an array of unrecognized arguments.
  *
- * @param params The input/output object.  The function will overwrite the
- *             parameters with values specified on the command line.
- * @param args  The command-line arguments to parse.  If not specified, then
- *           `process.argv.slice(2)` is used.
+ * @param params The input/output object. The function will overwrite the parameters with values specified on the command line
+ * @param args (Optional) The command-line arguments to parse. If not specified, then process.argv.slice(2) is used
+ *
  * @returns An array of unrecognized arguments.
  *
  * @remarks
- *
  * For a command-line-oriented application, it is helpful to specify solver parameters
  * using command-line arguments.  This function parses command-line arguments and
  * modifies the input _params_ object accordingly. It returns an array of
@@ -2607,7 +3815,7 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
  *
  * Major options:
  *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSLB|SetTimes
+ *   --searchType LNS|FDS|FDSDual|SetTimes
  *                                    Type of search to use
  *   --randomSeed uint32              Random seed
  *   --logLevel uint32                Level of the log
@@ -2625,10 +3833,10 @@ export function parseParameters(params = {}, args = process.argv.slice(2)) {
  * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
  * For example, `--worker0.searchType FDS` sets the search type to the first worker only.
  *
- * @see {@link parseParameters} for a similar function that doesn't accept unrecognized arguments.
+ * for parsing {@link BenchmarkParameters}.
  *
- * @see functions {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} for
- *    for parsing {@link BenchmarkParameters}.
+ * @see {@link parseParameters} for a similar function that doesn't accept unrecognized arguments.
+ * @see {@link parseBenchmarkParameters}, {@link parseSomeBenchmarkParameters} for parsing {@link BenchmarkParameters}.
  *
  * @group Parameters
  */
@@ -2666,14 +3874,16 @@ function paramsForJSON(params) {
         return {};
     let result = copyParameters(params);
     // A few parameters are for JavaScript only, not for the engine:
-    delete result.solverPath;
+    delete result.solver;
+    delete result.solverArgs;
     delete result.usage;
     delete result.version;
+    delete result.printLog;
     // JSON is not able to handle infinities, so convert them to strings:
     infinitiesToString(result);
     if (result.workers !== undefined)
         for (let w of result.workers)
-            infinitiesToString(result);
+            infinitiesToString(w);
     return result;
 }
 /** @internal */
@@ -2683,8 +3893,12 @@ function paramsFromJSON(params) {
     parseInfinities(params);
     if (params.workers !== undefined)
         for (let w of params.workers)
-            parseInfinities(params);
+            parseInfinities(w);
     return params;
+}
+/** @internal */
+function isWebSocketUrl(s) {
+    return /^wss?:\/\/|^https?:\/\//.test(s);
 }
 // Try to find solver executable in the given package.
 // relPath is the relative path within the package from its "bin" directory.
@@ -2699,61 +3913,22 @@ function getSolverPathFromPackage(packageName, relPath) {
         // On windows the URI may look like this:
         //   file:///C:/Users/.../node_modules/@scheduleopt/optalcp-bin/bin/
         // So we have to strip THREE slashes in this case:
-        if (process.platform == "win32" && binPath.startsWith("/"))
+        if (process.platform === "win32" && binPath.startsWith("/"))
             binPath = binPath.slice(1);
         let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
         if (fs.existsSync(result))
             return result;
         console.warn(`Found ${binPath} but the binary ${relPath} is not present there.`);
     }
-    catch (e) { }
+    catch { }
     return undefined;
 }
 /**
- * Compute path to the `optalcp` binary.
- *
- * @param params Parameters object that may contain the path to the solver.
- *
- * @remarks
- *
- * This function is used to compute the path to `optalcp` binary, for example,
- * when {@link solve} is called.  Usually, there's no need to call this function
- * directly.  However, it could be used to check the path in case of problems.
- *
- * The function works as follows:
- *   * If the `OPTALCP_SOLVER` environment variable is set, then it is used as the path.
- *   * If `params.solverPath` is set, its value is returned.
- *   * If npm package `@scheduleopt/optalcp-bin` is installed then
- *     it is searched for the `optalcp` executable.
- *   * If npm package `optalcp-bin-preview` is installed then
- *     the it is searched too.
- *   * Finally, if nothing from the above works, the function assumes that
- *     `optalcp` is in the `PATH` and returns returns just `optalcp`.
- *
- * @group Other
-*/
-export function calcSolverPath(params) {
-    if (params.solverPath !== undefined)
-        return params.solverPath;
-    if (process.env.OPTALCP_SOLVER !== undefined && process.env.OPTALCP_SOLVER !== "")
-        return process.env.OPTALCP_SOLVER;
-    let binaryName = process.platform == "win32" ? "optalcp.exe" : "optalcp";
-    // Path to the executable in the optalcp-bin and optalcp-bin-preview packages:
-    let relPath = process.platform + "-" + process.arch + "/" + binaryName;
-    // First try to locate the full version:
-    let result = getSolverPathFromPackage("@scheduleopt/optalcp-bin", relPath);
-    if (result !== undefined)
-        return result;
-    // Then try to locate the academic version:
-    result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-academic", relPath);
-    if (result !== undefined)
-        return result;
-    // Then try to locate the preview version:
-    result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-preview", relPath);
-    if (result !== undefined)
-        return result;
-    // Finally assume that optalcp is in the PATH
-    return "optalcp";
+ * @deprecated Use {@link Solver.findSolver} instead.
+ * #doc[calcSolverPath]
+ */
+export function calcSolverPath(params = {}) {
+    return Solver.findSolver(params);
 }
 /**
  @internal
@@ -2762,17 +3937,17 @@ export function calcSolverPath(params) {
  */
 function parametersToCLA(params) {
     let result = "";
-    let p = params;
+    const p = params;
     for (const key in p) {
-        if (key == "usage")
+        if (key === "usage")
             continue;
         let value = p[key];
-        if (value !== undefined && value !== null && typeof value != "object")
+        if (value !== undefined && value !== null && typeof value !== "object")
             result += "--" + key + " " + p[key] + " ";
     }
     if (params.workers !== undefined) {
         for (let i = 0; i < params.workers.length; i++) {
-            let w = params.workers[i];
+            const w = params.workers[i];
             if (w === undefined)
                 continue;
             let prefix = "worker" + i + ".";
@@ -2791,9 +3966,9 @@ function ParseNumber(value, parameterName) {
 }
 /** @internal */
 function ParseBool(value, parameterName) {
-    if (value == '1' || value == 't' || value == 'true')
+    if (value === '1' || value === 't' || value === 'true')
         return true;
-    if (value == '0' || value == 'f' || value == 'false')
+    if (value === '0' || value === 'f' || value === 'false')
         return false;
     throw Error("Value " + value + " for parameter " + parameterName + " is not a boolean.");
 }
@@ -2809,7 +3984,7 @@ function ParseString(value) {
 let ParameterCatalog = {
     // Color
     setColor: function (params, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter Color: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'never':
@@ -2842,22 +4017,46 @@ let ParameterCatalog = {
             throw Error("Parameter NbHelpers: value " + value + " is not in required range 0..4294967295.");
         params._nbHelpers = value;
     },
+    // Preset
+    setPreset: function (params, value) {
+        if (typeof value !== 'string')
+            throw Error('Parameter Preset: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'auto':
+                value = 'Auto';
+                break;
+            case 'default':
+                value = 'Default';
+                break;
+            case 'large':
+                value = 'Large';
+                break;
+            default: throw Error('Parameter Preset: value "' + value + '" is not valid.');
+        }
+        params.preset = value;
+    },
     // SearchType
     setSearchType: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter SearchType: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
+            case 'auto':
+                value = 'Auto';
+                break;
             case 'lns':
                 value = 'LNS';
                 break;
             case 'fds':
                 value = 'FDS';
                 break;
-            case 'fdslb':
-                value = 'FDSLB';
+            case 'fdsdual':
+                value = 'FDSDual';
                 break;
             case 'settimes':
                 value = 'SetTimes';
+                break;
+            case 'fdslb':
+                value = 'FDSLB';
                 break;
             default: throw Error('Parameter SearchType: value "' + value + '" is not valid.');
         }
@@ -2908,6 +4107,12 @@ let ParameterCatalog = {
         if (value < 4 || value > 1073741824)
             throw Error("Parameter AllocationBlockSize: value " + value + " is not in required range 4..1073741824.");
         params.allocationBlockSize = value;
+    },
+    // ProcessExitTimeout
+    setProcessExitTimeout: function (params, value) {
+        if (value < 0.000000 || value > Infinity)
+            throw Error("Parameter ProcessExitTimeout: value " + value + " is not in required range 0.000000..Infinity.");
+        params.processExitTimeout = value;
     },
     // TimeLimit
     setTimeLimit: function (params, value) {
@@ -2977,8 +4182,9 @@ let ParameterCatalog = {
         params.relativeGapTolerance = value;
     },
     // TagsFromNames
-    setTagsFromNames: function (params, value) {
-        if (typeof value != 'string')
+    /** @internal */
+    _setTagsFromNames: function (params, value) {
+        if (typeof value !== 'string')
             throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'never':
@@ -2995,22 +4201,22 @@ let ParameterCatalog = {
                 break;
             default: throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
         }
-        params.tagsFromNames = value;
+        params._tagsFromNames = value;
     },
     // NoOverlapPropagationLevel
     setNoOverlapPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter NoOverlapPropagationLevel: value " + value + " is not an integer.");
-        if (value < 1 || value > 4)
-            throw Error("Parameter NoOverlapPropagationLevel: value " + value + " is not in required range 1..4.");
+        if (value < 0 || value > 4)
+            throw Error("Parameter NoOverlapPropagationLevel: value " + value + " is not in required range 0..4.");
         workerParams.noOverlapPropagationLevel = value;
     },
     // CumulPropagationLevel
     setCumulPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter CumulPropagationLevel: value " + value + " is not an integer.");
-        if (value < 1 || value > 3)
-            throw Error("Parameter CumulPropagationLevel: value " + value + " is not in required range 1..3.");
+        if (value < 0 || value > 3)
+            throw Error("Parameter CumulPropagationLevel: value " + value + " is not in required range 0..3.");
         workerParams.cumulPropagationLevel = value;
     },
     // ReservoirPropagationLevel
@@ -3029,13 +4235,13 @@ let ParameterCatalog = {
             throw Error("Parameter PositionPropagationLevel: value " + value + " is not in required range 1..3.");
         workerParams.positionPropagationLevel = value;
     },
-    // StepFunctionSumPropagationLevel
-    setStepFunctionSumPropagationLevel: function (workerParams, value) {
+    // IntegralPropagationLevel
+    setIntegralPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
-            throw Error("Parameter StepFunctionSumPropagationLevel: value " + value + " is not an integer.");
+            throw Error("Parameter IntegralPropagationLevel: value " + value + " is not an integer.");
         if (value < 1 || value > 2)
-            throw Error("Parameter StepFunctionSumPropagationLevel: value " + value + " is not in required range 1..2.");
-        workerParams.stepFunctionSumPropagationLevel = value;
+            throw Error("Parameter IntegralPropagationLevel: value " + value + " is not in required range 1..2.");
+        workerParams.integralPropagationLevel = value;
     },
     // UsePrecedenceEnergy
     setUsePrecedenceEnergy: function (params, value) {
@@ -3046,20 +4252,22 @@ let ParameterCatalog = {
         params.usePrecedenceEnergy = value;
     },
     // PackPropagationLevel
-    setPackPropagationLevel: function (workerParams, value) {
+    /** @internal */
+    _setPackPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter PackPropagationLevel: value " + value + " is not an integer.");
         if (value < 1 || value > 2)
             throw Error("Parameter PackPropagationLevel: value " + value + " is not in required range 1..2.");
-        workerParams.packPropagationLevel = value;
+        workerParams._packPropagationLevel = value;
     },
     // ItvMappingPropagationLevel
-    setItvMappingPropagationLevel: function (workerParams, value) {
+    /** @internal */
+    _setItvMappingPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter ItvMappingPropagationLevel: value " + value + " is not an integer.");
         if (value < 1 || value > 2)
             throw Error("Parameter ItvMappingPropagationLevel: value " + value + " is not in required range 1..2.");
-        workerParams.itvMappingPropagationLevel = value;
+        workerParams._itvMappingPropagationLevel = value;
     },
     // SearchTraceLevel
     setSearchTraceLevel: function (workerParams, value) {
@@ -3113,7 +4321,7 @@ let ParameterCatalog = {
     },
     // FDSRatingAverageComparison
     setFDSRatingAverageComparison: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter FDSRatingAverageComparison: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'off':
@@ -3131,7 +4339,7 @@ let ParameterCatalog = {
     },
     // FDSReductionFactor
     setFDSReductionFactor: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter FDSReductionFactor: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'normal':
@@ -3239,7 +4447,7 @@ let ParameterCatalog = {
     },
     // FDSStrongBranchingCriterion
     setFDSStrongBranchingCriterion: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter FDSStrongBranchingCriterion: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'both':
@@ -3265,7 +4473,7 @@ let ParameterCatalog = {
     },
     // FDSRestartStrategy
     setFDSRestartStrategy: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter FDSRestartStrategy: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'geometric':
@@ -3346,7 +4554,7 @@ let ParameterCatalog = {
     },
     // FDSBranchOrdering
     setFDSBranchOrdering: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter FDSBranchOrdering: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'failurefirst':
@@ -3367,10 +4575,10 @@ let ParameterCatalog = {
     _setFDSDiveBySetTimes: function (workerParams, value) {
         workerParams._fdsDiveBySetTimes = value;
     },
-    // FDSLBStrategy
-    setFDSLBStrategy: function (workerParams, value) {
-        if (typeof value != 'string')
-            throw Error('Parameter FDSLBStrategy: value "' + value + '" is not valid.');
+    // FDSDualStrategy
+    setFDSDualStrategy: function (workerParams, value) {
+        if (typeof value !== 'string')
+            throw Error('Parameter FDSDualStrategy: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'minimum':
                 value = 'Minimum';
@@ -3381,13 +4589,31 @@ let ParameterCatalog = {
             case 'split':
                 value = 'Split';
                 break;
-            default: throw Error('Parameter FDSLBStrategy: value "' + value + '" is not valid.');
+            default: throw Error('Parameter FDSDualStrategy: value "' + value + '" is not valid.');
         }
-        workerParams.fdsLBStrategy = value;
+        workerParams.fdsDualStrategy = value;
     },
-    // FDSLBResetRatings
-    setFDSLBResetRatings: function (workerParams, value) {
-        workerParams.fdsLBResetRatings = value;
+    // FDSDualResetRatings
+    setFDSDualResetRatings: function (workerParams, value) {
+        workerParams.fdsDualResetRatings = value;
+    },
+    // LNSInitNoOverlapPropagationLevel
+    /** @internal */
+    _setLNSInitNoOverlapPropagationLevel: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter LNSInitNoOverlapPropagationLevel: value " + value + " is not an integer.");
+        if (value < 0 || value > 4)
+            throw Error("Parameter LNSInitNoOverlapPropagationLevel: value " + value + " is not in required range 0..4.");
+        workerParams._lnsInitNoOverlapPropagationLevel = value;
+    },
+    // LNSInitCumulPropagationLevel
+    /** @internal */
+    _setLNSInitCumulPropagationLevel: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter LNSInitCumulPropagationLevel: value " + value + " is not an integer.");
+        if (value < 0 || value > 3)
+            throw Error("Parameter LNSInitCumulPropagationLevel: value " + value + " is not in required range 0..3.");
+        workerParams._lnsInitCumulPropagationLevel = value;
     },
     // LNSFirstFailLimit
     /** @internal */
@@ -3879,7 +5105,7 @@ let ParameterCatalog = {
     // SetTimesHeightStrategy
     /** @internal */
     _setSetTimesHeightStrategy: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter SetTimesHeightStrategy: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'frommax':
@@ -3898,7 +5124,7 @@ let ParameterCatalog = {
     // SetTimesItvMappingStrategy
     /** @internal */
     _setSetTimesItvMappingStrategy: function (workerParams, value) {
-        if (typeof value != 'string')
+        if (typeof value !== 'string')
             throw Error('Parameter SetTimesItvMappingStrategy: value "' + value + '" is not valid.');
         switch (value.toLowerCase()) {
             case 'frommax':
@@ -3963,7 +5189,7 @@ let ParameterCatalog = {
     // POSAbsentRelated
     /** @internal */
     _setPOSAbsentRelated: function (workerParams, value) {
-        workerParams._pOSAbsentRelated = value;
+        workerParams._posAbsentRelated = value;
     },
     // DefaultCallbackBlockSize
     /** @internal */
@@ -4005,10 +5231,10 @@ let ParameterCatalog = {
 };
 /** @internal */
 let parserConfig = {
-    solverpath: {
-        name: 'SolverPath',
+    solver: {
+        name: 'Solver',
         parse: ParseString,
-        setGlobally: function (params, value) { params.solverPath = value; }
+        setGlobally: function (params, value) { params.solver = value; }
     },
     color: {
         name: 'Color',
@@ -4024,6 +5250,11 @@ let parserConfig = {
         name: 'NbHelpers',
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setNbHelpers,
+    },
+    preset: {
+        name: 'Preset',
+        parse: ParseString,
+        setGlobally: ParameterCatalog.setPreset,
     },
     searchtype: {
         name: 'SearchType',
@@ -4066,6 +5297,11 @@ let parserConfig = {
         name: 'AllocationBlockSize',
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setAllocationBlockSize,
+    },
+    processexittimeout: {
+        name: 'ProcessExitTimeout',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog.setProcessExitTimeout,
     },
     timelimit: {
         name: 'TimeLimit',
@@ -4120,7 +5356,7 @@ let parserConfig = {
     tagsfromnames: {
         name: 'TagsFromNames',
         parse: ParseString,
-        setGlobally: ParameterCatalog.setTagsFromNames,
+        setGlobally: ParameterCatalog._setTagsFromNames,
     },
     nooverlappropagationlevel: {
         name: 'NoOverlapPropagationLevel',
@@ -4146,11 +5382,11 @@ let parserConfig = {
         setGlobally: ParameterCatalog.setPositionPropagationLevel,
         setOnWorker: ParameterCatalog.setPositionPropagationLevel,
     },
-    stepfunctionsumpropagationlevel: {
-        name: 'StepFunctionSumPropagationLevel',
+    integralpropagationlevel: {
+        name: 'IntegralPropagationLevel',
         parse: ParseNumber,
-        setGlobally: ParameterCatalog.setStepFunctionSumPropagationLevel,
-        setOnWorker: ParameterCatalog.setStepFunctionSumPropagationLevel,
+        setGlobally: ParameterCatalog.setIntegralPropagationLevel,
+        setOnWorker: ParameterCatalog.setIntegralPropagationLevel,
     },
     useprecedenceenergy: {
         name: 'UsePrecedenceEnergy',
@@ -4160,14 +5396,14 @@ let parserConfig = {
     packpropagationlevel: {
         name: 'PackPropagationLevel',
         parse: ParseNumber,
-        setGlobally: ParameterCatalog.setPackPropagationLevel,
-        setOnWorker: ParameterCatalog.setPackPropagationLevel,
+        setGlobally: ParameterCatalog._setPackPropagationLevel,
+        setOnWorker: ParameterCatalog._setPackPropagationLevel,
     },
     itvmappingpropagationlevel: {
         name: 'ItvMappingPropagationLevel',
         parse: ParseNumber,
-        setGlobally: ParameterCatalog.setItvMappingPropagationLevel,
-        setOnWorker: ParameterCatalog.setItvMappingPropagationLevel,
+        setGlobally: ParameterCatalog._setItvMappingPropagationLevel,
+        setOnWorker: ParameterCatalog._setItvMappingPropagationLevel,
     },
     searchtracelevel: {
         name: 'SearchTraceLevel',
@@ -4402,17 +5638,29 @@ let parserConfig = {
         setGlobally: ParameterCatalog._setFDSDiveBySetTimes,
         setOnWorker: ParameterCatalog._setFDSDiveBySetTimes,
     },
-    fdslbstrategy: {
-        name: 'FDSLBStrategy',
+    fdsdualstrategy: {
+        name: 'FDSDualStrategy',
         parse: ParseString,
-        setGlobally: ParameterCatalog.setFDSLBStrategy,
-        setOnWorker: ParameterCatalog.setFDSLBStrategy,
+        setGlobally: ParameterCatalog.setFDSDualStrategy,
+        setOnWorker: ParameterCatalog.setFDSDualStrategy,
     },
-    fdslbresetratings: {
-        name: 'FDSLBResetRatings',
+    fdsdualresetratings: {
+        name: 'FDSDualResetRatings',
         parse: ParseBool,
-        setGlobally: ParameterCatalog.setFDSLBResetRatings,
-        setOnWorker: ParameterCatalog.setFDSLBResetRatings,
+        setGlobally: ParameterCatalog.setFDSDualResetRatings,
+        setOnWorker: ParameterCatalog.setFDSDualResetRatings,
+    },
+    lnsinitnooverlappropagationlevel: {
+        name: 'LNSInitNoOverlapPropagationLevel',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSInitNoOverlapPropagationLevel,
+        setOnWorker: ParameterCatalog._setLNSInitNoOverlapPropagationLevel,
+    },
+    lnsinitcumulpropagationlevel: {
+        name: 'LNSInitCumulPropagationLevel',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSInitCumulPropagationLevel,
+        setOnWorker: ParameterCatalog._setLNSInitCumulPropagationLevel,
     },
     lnsfirstfaillimit: {
         name: 'LNSFirstFailLimit',
@@ -4917,8 +6165,7 @@ class ParameterParser {
             throw Error("Unrecognized command line option: " + opt);
     }
     #getOrCreateWorker(workerId) {
-        if (this.#params.workers === undefined)
-            this.#params.workers = [];
+        this.#params.workers ??= [];
         if (this.#params.workers[workerId] === undefined) {
             let result = {};
             this.#params.workers[workerId] = result;
@@ -4937,15 +6184,15 @@ class ParameterParser {
         //   --workers0-3.searchType
         if (opt.match(/^worker[s]?[0-9]/)) {
             opt = opt.slice(6);
-            if (opt[0] == 's')
+            if (opt[0] === 's')
                 opt = opt.slice(1);
             let dotPosition = opt.indexOf(".");
-            if (dotPosition == -1)
+            if (dotPosition === -1)
                 throw Error("Invalid worker specification: " + name);
             let workerDesc = opt.slice(0, dotPosition);
             opt = opt.slice(dotPosition + 1);
             let dashPosition = workerDesc.indexOf("-");
-            if (dashPosition == -1) {
+            if (dashPosition === -1) {
                 // Single worker specification
                 let singleWorker = Number(workerDesc);
                 if (Number.isNaN(singleWorker))
@@ -4956,7 +6203,7 @@ class ParameterParser {
                 // Worker range specification
                 let minWorker = Number(workerDesc.slice(0, dashPosition));
                 let maxWorker = Number(workerDesc.slice(dashPosition + 1));
-                if (minWorker == -1 || maxWorker == -1)
+                if (minWorker === -1 || maxWorker === -1)
                     throw Error("Invalid worker specification: " + name);
                 if (minWorker > maxWorker)
                     throw Error("Empty range worker specification: " + name);
@@ -4990,13 +6237,13 @@ class ParameterParser {
                 continue;
             }
             let splitPoint = opt.indexOf("=");
-            if (splitPoint != -1) {
+            if (splitPoint !== -1) {
                 if (!this.#applyParameter(opt.slice(0, splitPoint), opt.slice(splitPoint + 1)))
                     this.#addUnrecognized(options[i]);
                 i++;
                 continue;
             }
-            if (i == options.length - 1) {
+            if (i === options.length - 1) {
                 if (!this.#unknownAllowed)
                     throw Error("Missing value for command line option: " + opt);
                 this.#addUnrecognized(options[i]);
@@ -5027,6 +6274,7 @@ class ParameterParser {
 }
 ;
 /**
+ * @remarks
  * Solution of a {@link Model}. When a model is solved, the solution is stored
  * in this object. The solution contains values of all variables in the model
  * (including optional variables) and the value of the objective (if the model
@@ -5035,7 +6283,7 @@ class ParameterParser {
  * ### Preview version of OptalCP
  *
  * Note that in the preview version of OptalCP, the values of variables in
- * the solution are masked and replaced by value _absent_ (`null` in JavaScript).
+ * the solution are masked and replaced by value *absent* (`null`).
  *
  * @group Solving
  */
@@ -5057,14 +6305,21 @@ export class Solution {
     /** @internal (read from a message sent by the solver) */
     _init(msg) {
         this.#values = [];
-        for (var v of msg.values)
-            this.#values[v.id] = v.value;
+        // When deferSolution is true, solution messages don't include values
+        if (msg.values) {
+            for (var v of msg.values)
+                this.#values[v.id] = v.value;
+        }
         this.#objective = msg.objective;
     }
     /**
-     * Returns the objective value of the solution. If the model did not specify an
-     * objective returns _undefined_. If the objective value is _absent_
-     * (see optional {@link IntExpr}) then it returns _null_.
+     * Returns the objective value of the solution.
+     *
+     * @returns The objective value
+     *
+     * @remarks
+     * Returns `null` if no objective was specified or if the objective expression
+     * is *absent* (see optional {@link IntExpr}).
      *
      * The correct value is reported even in the preview version of OptalCP.
      */
@@ -5072,15 +6327,20 @@ export class Solution {
     /** @internal */
     isPresent(variable) {
         assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
-        return this.#values[variable._getId()] !== null;
+        let val = this.#values[variable._getId()];
+        return val !== null && val !== undefined;
     }
     isAbsent(variable) {
         assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
-        return this.#values[variable._getId()] === null;
+        let val = this.#values[variable._getId()];
+        return val === null || val === undefined;
     }
+    // Return type above is IntervalVarValue, but it is spelled out for doc generation (it is the only place where it is public)
     getValue(variable) {
         assert(!variable._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
         let result = this.#values[variable._getId()];
+        if (result === undefined)
+            return null;
         if (!(variable instanceof BoolVar))
             return result;
         if (result === null)
@@ -5088,44 +6348,78 @@ export class Solution {
         return result === 1;
     }
     /**
-     * Returns the start of the given interval variable in the solution.
-     * If the variable is absent in the solution, it returns _null_.
+     * Gets an interval variable's start time from the solution.
+     *
+     * @param variable The interval variable to query
+     *
+     * @returns The start value, or None if absent
+     *
+     * @remarks
+     * If the variable is *absent* in the solution, it returns `null`.
      *
      * In the preview version of OptalCP, this function always returns `null`
-     * because real values of variables are masked and replaced by value _absent_.
+     * because real values of variables are masked and replaced by value *absent*.
      */
     getStart(variable) {
         const value = this.#values[variable._getId()];
-        if (value !== null)
-            return value.start;
-        return null;
+        if (value === undefined || value === null)
+            return null;
+        return value.start;
     }
     /**
-     * Returns the end of the given interval variable in the solution.
-     * If the variable is absent in the solution, it returns _null_.
+     * Gets an interval variable's end time from the solution.
+     *
+     * @param variable The interval variable to query
+     *
+     * @returns The end value, or None if absent
+     *
+     * @remarks
+     * If the variable is *absent* in the solution, it returns `null`.
      *
      * In the preview version of OptalCP, this function always returns `null`
-     * because real values of variables are masked and replaced by value _absent_.
+     * because real values of variables are masked and replaced by value *absent*.
      */
     getEnd(variable) {
         const value = this.#values[variable._getId()];
-        if (value !== null)
-            return value.end;
-        return null;
+        if (value === undefined || value === null)
+            return null;
+        return value.end;
+    }
+    /**
+     * Gets an interval variable's length from the solution.
+     *
+     * @param variable The interval variable to query
+     *
+     * @returns The length value, or None if absent
+     *
+     * @remarks
+     * If the variable is *absent* in the solution, it returns `null`.
+     *
+     * In the preview version of OptalCP, this function always returns `null`
+     * because real values of variables are masked and replaced by value *absent*.
+     */
+    getLength(variable) {
+        const value = this.#values[variable._getId()];
+        if (value === undefined || value === null)
+            return null;
+        return value.end - value.start;
     }
     /**
      * Sets objective value of the solution.
      *
-     * This function
-     * can be used for construction of an external solution that can be passed to
-     * the solver (see {@link solve}, {@link Solver} and {@link
-     * Solver.sendSolution}).
+     * @param value The objective value to set
+     *
+     * @remarks
+     * This function can be used for construction of an external solution that can be
+     * passed to the solver (see {@link Model.solve}, {@link Solver} and
+     * {@link Solver.sendSolution}).
      */
     setObjective(value) { this.#objective = value; }
     setAbsent(variable) {
         assert(!variable._getProps().func.startsWith("_")); // Can't set values of auxiliary variables
         this.#values[variable._getId()] = null;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setValue(variable, ...args) {
         assert(!variable._getProps().func.startsWith("_")); // Can't set values of auxiliary variables
         if (variable instanceof IntervalVar)
@@ -5171,17 +6465,17 @@ export class ModelDomains {
     /** @internal */
     isPresent(v) {
         assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
-        return this.#domains[v._getId()].presence == 1 /* PresenceStatus.Present */;
+        return this.#domains[v._getId()].presence === 1 /* PresenceStatus.Present */;
     }
     /** @internal */
     isAbsent(v) {
         assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
-        return this.#domains[v._getId()].presence == 2 /* PresenceStatus.Absent */;
+        return this.#domains[v._getId()].presence === 2 /* PresenceStatus.Absent */;
     }
     /** @internal */
     isOptional(v) {
         assert(!v._getProps().func.startsWith("_")); // Can't ask for values of auxiliary variables
-        return this.#domains[v._getId()].presence == 0 /* PresenceStatus.Optional */;
+        return this.#domains[v._getId()].presence === 0 /* PresenceStatus.Optional */;
     }
     /** @internal */
     getMin(v) {
@@ -5257,115 +6551,106 @@ export class ModelDomains {
 ;
 // === Class Model ===========================================================
 /**
+ * @remarks
  * _Model_ captures the problem to be solved. It contains variables,
  * constraints and objective function.
  *
  * To create an optimization model, you must first create a _Model_ object.
- * Then you can use the methods of the _Model_ to create variables (e.g.  {@link
- * intervalVar}), the objective function ({@link minimize} or {@link maximize})
- * and constraints (e.g. {@link constraint} or {@link noOverlap}).
+ * Then you can use the methods of the _Model_ to create variables (e.g. {@link Model.intervalVar}), the objective function ({@link Model.minimize} or {@link Model.maximize})
+ * and constraints (e.g. {@link Model.noOverlap}).
  * Note that a boolean expression becomes a constraint only by passing it to
- * the function {@link constraint}; otherwise, it is not enforced.
+ * {@link Model.enforce}; otherwise, it is not enforced.
  *
- * To solve a model, pass it to function {@link solve} or to {@link Solver}
+ * To solve a model, pass it to function {@link Model.solve} or to {@link Solver}
  * class.
  *
- * ### Available modeling elements
+ * ## Available modeling elements
  *
- * #### Variables
+ * ### Variables
  *
- * Interval variables can be created by function {@link intervalVar}, integer variables by function {@link intVar}.
+ * Interval variables can be created by function {@link Model.intervalVar}, integer variables by function {@link Model.intVar}.
  *
- * #### Basic integer expressions
+ * ### Basic integer expressions
  *
- * * {@link startOf}: start of an interval variable (optional integer expression).
- * * {@link startOr}: start of an interval variable or a constant when it is _absent_.
- * * {@link endOf}:   end of an interval variable (optional integer expression).
- * * {@link endOr}:   end of an interval variable or a constant when it is _absent_.
- * * {@link lengthOf}: length of an interval variable (optional integer expression).
- * * {@link lengthOr}: length of an interval variable or a constant when it is _absent_.
- * * {@link guard}: replaces _absent_ value by a constant.
+ * * {@link Model.start}: start of an interval variable (optional integer expression).
+ * * {@link Model.end}:   end of an interval variable (optional integer expression).
+ * * {@link Model.length}: length of an interval variable (optional integer expression).
+ * * {@link Model.guard}: replaces *absent* value by a constant.
  *
- * #### Integer arithmetics
+ * ### Integer arithmetics
  *
- * * {@link plus}:  addition.
- * * {@link minus}: subtraction.
- * * {@link neg}:   negation (changes sign).
- * * {@link times}: multiplication.
- * * {@link div}:   division (rounds to zero).
- * * {@link abs}:   absolute value.
- * * {@link min2}:  minimum of two integer expressions.
- * * {@link min}:   minimum of an array of integer expressions.
- * * {@link max2}:  maximum of two integer expressions.
- * * {@link max}:   maximum of an array of integer expressions.
- * * {@link sum}:   sum of an array of integer expressions.
+ * * {@link Model.plus}:  addition.
+ * * {@link Model.minus}: subtraction.
+ * * {@link Model.neg}:   negation (changes sign).
+ * * {@link Model.times}: multiplication.
+ * * {@link Model.div}:   division (rounds to zero).
  *
- * #### Comparison operators for integer expressions
+ * * {@link Model.abs}:   absolute value.
+ * * {@link Model.min2}:  minimum of two integer expressions.
+ * * {@link Model.min}:   minimum of an array of integer expressions.
+ * * {@link Model.max2}:  maximum of two integer expressions.
+ * * {@link Model.max}:   maximum of an array of integer expressions.
+ * * {@link Model.sum}:   sum of an array of integer expressions.
  *
- * * {@link eq}: equality.
- * * {@link ne}: inequality.
- * * {@link lt}: less than.
- * * {@link le}: less than or equal to.
- * * {@link gt}: greater than.
- * * {@link ge}: greater than or equal to.
- * * {@link identity}: constraints two integer expressions to be equal, including the presence status.
+ * ### Comparison operators for integer expressions
  *
- * #### Boolean operators
+ * * {@link Model.eq}: equality.
+ * * {@link Model.ne}: inequality.
+ * * {@link Model.lt}: less than.
+ * * {@link Model.le}: less than or equal to.
+ * * {@link Model.gt}: greater than.
+ * * {@link Model.ge}: greater than or equal to.
  *
- * * {@link not}: negation.
- * * {@link and}: conjunction.
- * * {@link or}:  disjunction.
- * * {@link implies}: implication.
+ * * {@link Model.identity}: constraints two integer expressions to be equal, including the presence status.
  *
- * #### Functions returning {@link BoolExpr}
+ * ### Boolean operators
  *
- * * {@link presenceOf}: whether the argument is _present_ or _absent_.
- * * {@link inRange}: whether an integer expression is within the given range
+ * * {@link Model.not}: negation.
+ * * {@link Model.and}: conjunction.
+ * * {@link Model.or}:  disjunction.
+ * * {@link Model.implies}: implication.
  *
- * #### Basic constraints on interval variables
+ * ### Functions returning {@link BoolExpr}
  *
- * * {@link alternative}: an alternative between multiple interval variables.
- * * {@link span}: span (cover) of interval variables.
- * * {@link endBeforeEnd}, {@link endBeforeStart}, {@link startBeforeEnd}, {@link startBeforeStart},
- *   {@link endAtStart}, {@link startAtEnd}: precedence constraints.
+ * * {@link Model.presence}: whether the argument is *present* or *absent*.
+ * * {@link Model.inRange}: whether an integer expression is within the given range
  *
- * #### Disjunction (noOverlap)
+ * ### Basic constraints on interval variables
  *
- *  * {@link sequenceVar}: sequence variable over a set of interval variables.
- *  * {@link noOverlap}: constraints a set of interval variables to not overlap (possibly with transition times).
- *  * {@link position}: returns the position of an interval variable in a sequence.
+ * * {@link Model.alternative}: an alternative between multiple interval variables.
+ * * {@link Model.span}: span (cover) of interval variables.
+ * * {@link Model.endBeforeEnd}, {@link Model.endBeforeStart}, {@link Model.startBeforeEnd}, {@link Model.startBeforeStart},
+ *   {@link Model.endAtStart}, {@link Model.startAtEnd}: precedence constraints.
  *
- * #### Basic cumulative expressions
+ * ### Disjunction (noOverlap)
  *
- * * {@link pulse}: changes value during the interval variable.
- * * {@link stepAtStart}: changes value at the start of the interval variable.
- * * {@link stepAtEnd}: changes value at the end of the interval variable.
- * * {@link stepAt}: changes value at a given time.
+ * * {@link Model.sequenceVar}: sequence variable over a set of interval variables.
+ * * {@link Model.noOverlap}: constraints a set of interval variables to not overlap (possibly with transition times).
+ * * {@link Model.position}: returns the position of an interval variable in a sequence.
  *
- * #### Combining cumulative expressions
+ * ### Basic cumulative expressions
  *
- * * {@link cumulNeg}: negation.
- * * {@link cumulPlus}: addition.
- * * {@link cumulMinus}: subtraction.
- * * {@link cumulSum}: sum of multiple expressions.
+ * * {@link Model.pulse}: changes value during the interval variable.
+ * * {@link Model.stepAtStart}: changes value at the start of the interval variable.
+ * * {@link Model.stepAtEnd}: changes value at the end of the interval variable.
+ * * {@link Model.stepAt}: changes value at a given time.
  *
- * #### Constraints on cumulative expressions
+ * ### Combining cumulative expressions
  *
- * * {@link cumulGe}: greater than or equal to a constant.
- * * {@link cumulLe}: less than or equal to a constant.
+ * * {@link Model.cumulNeg}: negation.
+ * * {@link Model.cumulPlus}: addition.
+ * * {@link Model.cumulMinus}: subtraction.
+ * * {@link Model.cumulSum}: sum of multiple expressions.
  *
- * #### Mapping/batching
+ * ### Constraints on cumulative expressions
  *
- * * {@link itvMapping}: map tasks (interval variables) to slots (other interval variables).
+ * * {@link Model.cumulGe}: greater than or equal to a constant.
+ * * {@link Model.cumulLe}: less than or equal to a constant.
  *
- * #### Constraints on integer variables/expressions
+ * ### Objective
  *
- * * {@link pack}: pack items of various sizes into a set of bins.
- *
- * #### Objective
- *
- * * {@link minimize}: minimize an integer expression.
- * * {@link maximize}: maximize an integer expression.
+ * * {@link Model.minimize}: minimize an integer expression.
+ * * {@link Model.maximize}: maximize an integer expression.
  *
  * @example
  *
@@ -5405,7 +6690,7 @@ export class ModelDomains {
  * }
  *
  * // Limit the sum of the pulses to the number of workers available:
- * model.cumulSum(workerUsage).cumulLe(nbWorkers);
+ * model.sum(workerUsage).le(nbWorkers);
  * // From an array of tasks, create an array of their ends:
  * let ends = tasks.map(t => t.end());
  * // And minimize the maximum of the ends:
@@ -5413,7 +6698,7 @@ export class ModelDomains {
  *
  * try {
  *   // Solve the model with the provided parameters:
- *   let result = await CP.solve(model, {
+ *   let result = await model.solve({
  *     timeLimit: 3, // Stop after 3 seconds
  *     nbWorkers: 4, // Use for CPU threads
  *   });
@@ -5421,30 +6706,30 @@ export class ModelDomains {
  *   if (result.nbSolutions == 0)
  *     console.log("No solution found.");
  *   else {
- *     const solution = result.bestSolution!;
+ *     const solution = result.solution!;
  *     // Note that in the preview version of the solver, the variable values in
- *     // the solution are masked, i.e. they are all _absent_ (`null` in JavaScript).
+ *     // the solution are masked, i.e. they are all *absent* (`null` in JavaScript).
  *     // Objective value is not masked though.
  *     console.log("Solution found with makespan " + solution.getObjective());
  *     for (let task of tasks) {
  *       let start = solution.getStart(task);
  *       if (start !== null)
- *         console.log("Task " + task.getName() + " starts at " + );
+ *         console.log("Task " + task.getName() + " starts at " + start);
  *       else
  *         console.log("Task " + task.getName() + " is absent (not scheduled).")
  *     }
  *   }
  *
  * } catch (e) {
- *   // In case of error, CP.solve returns a rejected promise.
- *   // Therefore, "await CP.solve" throws an exception.
+ *   // In case of error, model.solve returns a rejected promise.
+ *   // Therefore, "await model.solve" throws an exception.
  *   console.log("Error: " + (e as Error).message);
  * }
  * ```
  *
- * @see {@link solve}
- * @see {@link Solution}
- * @see {@link Solver}
+ * @see {@link Model.solve}.
+ * @see {@link Solution}.
+ * @see {@link Solver}.
  *
  * @group Modeling
  */
@@ -5474,1994 +6759,2320 @@ export class Model {
     /** @internal */
     _reusableBoolExpr(value) {
         let outParams = [GetBoolExpr(value)];
-        return new BoolExpr(this, "reusableBoolExpr", outParams);
+        return BoolExpr._Create(this, "reusableBoolExpr", outParams);
     }
     /** @internal */
     _reusableIntExpr(value) {
         let outParams = [GetIntExpr(value)];
-        return new IntExpr(this, "reusableIntExpr", outParams);
+        return IntExpr._Create(this, "reusableIntExpr", outParams);
     }
     /** @internal */
     _reusableFloatExpr(value) {
         let outParams = [GetFloatExpr(value)];
-        return new FloatExpr(this, "reusableFloatExpr", outParams);
+        return FloatExpr._Create(this, "reusableFloatExpr", outParams);
     }
     /**
-    * Negation of the boolean expression `arg`.
-    *
-    * @remarks
-    *
-    * If the argument has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link BoolExpr.not | BoolExpr.not}. */
+     * Negation of the boolean expression `arg`.
+     *
+     * @param arg The boolean expression to negate.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If the argument has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Same as {@link BoolExpr.not}.
+     */
     not(arg) {
         let outParams = [GetBoolExpr(arg)];
-        return new BoolExpr(this, "boolNot", outParams);
+        return BoolExpr._Create(this, "boolNot", outParams);
     }
     /**
-    * Logical _OR_ of boolean expressions `arg1` and `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link BoolExpr.or | BoolExpr.or}. */
-    or(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolOr", outParams);
+     * Logical _OR_ of boolean expressions `lhs` and `rhs`.
+     *
+     * @param lhs The first boolean expression.
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link BoolExpr.or}.
+     */
+    or(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolOr", outParams);
     }
     /**
-    * Logical _AND_ of boolean expressions `arg1` and `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link BoolExpr.and | BoolExpr.and}. */
-    and(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolAnd", outParams);
+     * Logical _AND_ of boolean expressions `lhs` and `rhs`.
+     *
+     * @param lhs The first boolean expression.
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link BoolExpr.and}.
+     */
+    and(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolAnd", outParams);
     }
     /**
-    * Logical implication of two boolean expressions, that is `arg1` implies `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link BoolExpr.implies | BoolExpr.implies}. */
-    implies(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolImplies", outParams);
+     * Logical implication of two boolean expressions, that is `lhs` implies `rhs`.
+     *
+     * @param lhs The first boolean expression.
+     * @param rhs The second boolean expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link BoolExpr.implies}.
+     */
+    implies(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolImplies", outParams);
     }
     /** @internal */
-    _eq(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolEq", outParams);
+    _eq(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolEq", outParams);
     }
     /** @internal */
-    _ne(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolNe", outParams);
+    _ne(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolNe", outParams);
     }
     /** @internal */
-    _nand(arg1, arg2) {
-        let outParams = [GetBoolExpr(arg1), GetBoolExpr(arg2)];
-        return new BoolExpr(this, "boolNand", outParams);
+    _nand(lhs, rhs) {
+        let outParams = [GetBoolExpr(lhs), GetBoolExpr(rhs)];
+        return BoolExpr._Create(this, "boolNand", outParams);
     }
     /**
-    * Creates an expression that replaces value _absent_ by a constant.
-    *
-    * @remarks
-    * The resulting expression is:
-    *
-    * * equal to `arg` if `arg` is _present_
-    * * and equal to `absentValue` otherwise (i.e. when `arg` is _absent_).
-    *
-    * The default value of `absentValue` is 0.
-    *
-    * The resulting expression is never _absent_.
-    *
-    * Same as {@link IntExpr.guard | IntExpr.guard}. */
+     * Creates an expression that replaces value *absent* by a constant.
+     *
+     * @param arg The integer expression to guard.
+     * @param absentValue The value to use when the expression is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The resulting expression is:
+     *
+     * * equal to `arg` if `arg` is *present*
+     * * and equal to `absentValue` otherwise (i.e. when `arg` is *absent*).
+     *
+     * The default value of `absentValue` is 0.
+     *
+     * The resulting expression is never *absent*.
+     *
+     * Same as {@link IntExpr.guard}.
+     */
     guard(arg, absentValue = 0) {
         let outParams = [GetIntExpr(arg), GetInt(absentValue)];
-        return new IntExpr(this, "intGuard", outParams);
+        return IntExpr._Create(this, "intGuard", outParams);
     }
     /**
-    * Creates negation of the integer expression, i.e. `-arg`.
-    *
-    * @remarks
-    *
-    * If the value of `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link IntExpr.neg | IntExpr.neg}. */
-    neg(arg) {
-        let outParams = [GetIntExpr(arg)];
-        return new IntExpr(this, "intNeg", outParams);
+     * Creates a multiplication of the two integer expressions, i.e. `lhs * rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link IntExpr.times}.
+     */
+    times(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return IntExpr._Create(this, "intTimes", outParams);
     }
     /**
-    * Creates an addition of the two integer expressions, i.e. `arg1 + arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.plus | IntExpr.plus}. */
-    plus(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intPlus", outParams);
-    }
-    /**
-    * Creates a subtraction of the two integer expressions, i.e. `arg1 + arg2`.@remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.minus | IntExpr.minus}. */
-    minus(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intMinus", outParams);
-    }
-    /**
-    * Creates a multiplication of the two integer expressions, i.e. `arg1 * arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.times | IntExpr.times}. */
-    times(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intTimes", outParams);
-    }
-    /**
-    * Creates an integer division of the two integer expressions, i.e. `arg1 div arg2`. The division rounds towards zero.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.div | IntExpr.div}. */
-    div(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intDiv", outParams);
+     * Creates an integer division of the two integer expressions, i.e. `lhs div rhs`. The division rounds towards zero.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, the resulting expression also has value *absent*.
+     *
+     * Same as {@link IntExpr.div}.
+     */
+    div(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return IntExpr._Create(this, "intDiv", outParams);
     }
     /** @internal */
-    _modulo(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "modulo", outParams);
+    _modulo(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return IntExpr._Create(this, "modulo", outParams);
     }
     /**
-    * Constraints `arg1` and `arg2` to be identical, including their presence status.
-    *
-    * @remarks
-    *
-    * Identity is different than equality. For example, if `x` is _absent_, then `eq(x, 0)` is _absent_, but `identity(x, 0)` is _false_.
-    *
-    * Same as {@link IntExpr.identity | IntExpr.identity}. */
-    identity(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        new Constraint(this, "intIdentity", outParams);
+     * Constrains `lhs` and `rhs` to be identical, including their presence status.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The identity constraint.
+     *
+     * @remarks
+     * Identity is different than equality. For example, if `x` is *absent*, then `eq(x, 0)` is *absent*, but `identity(x, 0)` is `false`.
+     *
+     * Same as {@link IntExpr.identity}.
+     */
+    identity(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return Constraint._Create(this, "intIdentity", outParams);
     }
     /**
-    * Creates Boolean expression `arg1` = `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.eq | IntExpr.eq}. */
-    eq(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intEq", outParams);
+     * Creates Boolean expression `lhs` = `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link IntExpr.eq}.
+     */
+    eq(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return BoolExpr._Create(this, "intEq", outParams);
     }
     /**
-    * Creates Boolean expression `arg1` &ne; `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.ne | IntExpr.ne}. */
-    ne(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intNe", outParams);
+     * Creates Boolean expression `lhs` &ne; `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link IntExpr.ne}.
+     */
+    ne(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return BoolExpr._Create(this, "intNe", outParams);
     }
     /**
-    * Creates Boolean expression `arg1` < `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.lt | IntExpr.lt}. */
-    lt(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intLt", outParams);
+     * Creates Boolean expression `lhs` < `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link IntExpr.lt}.
+     */
+    lt(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return BoolExpr._Create(this, "intLt", outParams);
     }
     /**
-    * Creates Boolean expression `arg1` &le; `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.le | IntExpr.le}. */
-    le(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intLe", outParams);
+     * Creates Boolean expression `lhs` > `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link IntExpr.gt}.
+     */
+    gt(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return BoolExpr._Create(this, "intGt", outParams);
     }
     /**
-    * Creates Boolean expression `arg1` > `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.gt | IntExpr.gt}. */
-    gt(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intGt", outParams);
-    }
-    /**
-    * Creates Boolean expression `arg1` &ge; `arg2`.
-    *
-    * @remarks
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.ge | IntExpr.ge}. */
-    ge(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new BoolExpr(this, "intGe", outParams);
-    }
-    /**
-    * Creates Boolean expression `lb` &le; `arg` &le; `ub`.
-    *
-    * @remarks
-    *
-    * If `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Use function {@link Model.constraint} to create a constraint from this expression.
-    *
-    * Same as {@link IntExpr.inRange | IntExpr.inRange}. */
+     * Creates Boolean expression `lb` &le; `arg` &le; `ub`.
+     *
+     * @param arg The integer expression to check.
+     * @param lb The lower bound of the range.
+     * @param ub The upper bound of the range.
+     *
+     * @returns The resulting Boolean expression
+     *
+     * @remarks
+     * If `arg` has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Use {@link Model.enforce} to add this expression as a constraint to the model.
+     *
+     * Same as {@link IntExpr.inRange}.
+     */
     inRange(arg, lb, ub) {
         let outParams = [GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        return new BoolExpr(this, "intInRange", outParams);
+        return BoolExpr._Create(this, "intInRange", outParams);
     }
     /** @internal */
     _notInRange(arg, lb, ub) {
         let outParams = [GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        return new BoolExpr(this, "intNotInRange", outParams);
+        return BoolExpr._Create(this, "intNotInRange", outParams);
     }
     /**
-    * Creates an integer expression which is absolute value of `arg`.
-    *
-    * @remarks
-    *
-    * If `arg` has value _absent_ then the resulting expression has also value _absent_.
-    *
-    * Same as {@link IntExpr.abs | IntExpr.abs}. */
+     * Creates an integer expression which is absolute value of `arg`.
+     *
+     * @param arg The integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If `arg` has value *absent* then the resulting expression has also value *absent*.
+     *
+     * Same as {@link IntExpr.abs}.
+     */
     abs(arg) {
         let outParams = [GetIntExpr(arg)];
-        return new IntExpr(this, "intAbs", outParams);
+        return IntExpr._Create(this, "intAbs", outParams);
     }
     /**
-    * Creates an integer expression which is the minimum of `arg1` and `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.min2 | IntExpr.min2}. See {@link Model.min | Model.min} for n-ary minimum. */
-    min2(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intMin2", outParams);
+     * Creates an integer expression which is the minimum of `lhs` and `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link IntExpr.min2}. See {@link Model.min} for n-ary minimum.
+     */
+    min2(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return IntExpr._Create(this, "intMin2", outParams);
     }
     /**
-    * Creates an integer expression which is the maximum of `arg1` and `arg2`.
-    *
-    * @remarks
-    *
-    * If one of the arguments has value _absent_, then the resulting expression also has value _absent_.
-    *
-    * Same as {@link IntExpr.max2 | IntExpr.max2}. See {@link Model.max | Model.max} for n-ary maximum. */
-    max2(arg1, arg2) {
-        let outParams = [GetIntExpr(arg1), GetIntExpr(arg2)];
-        return new IntExpr(this, "intMax2", outParams);
+     * Creates an integer expression which is the maximum of `lhs` and `rhs`.
+     *
+     * @param lhs The first integer expression.
+     * @param rhs The second integer expression.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If one of the arguments has value *absent*, then the resulting expression also has value *absent*.
+     *
+     * Same as {@link IntExpr.max2}. See {@link Model.max} for n-ary maximum.
+     */
+    max2(lhs, rhs) {
+        let outParams = [GetIntExpr(lhs), GetIntExpr(rhs)];
+        return IntExpr._Create(this, "intMax2", outParams);
     }
     /** @internal */
     _square(arg) {
         let outParams = [GetIntExpr(arg)];
-        return new IntExpr(this, "intSquare", outParams);
+        return IntExpr._Create(this, "intSquare", outParams);
     }
     /**
-    * Creates in integer expression for the sum of the arguments.
-    *
-    * @remarks
-    *
-    * Absent arguments are ignored (treated as zeros). Therefore, the resulting expression is never _absent_.
-    *
-    * Note that binary function {@link Model.plus} handles absent values differently. For example, when `x` is _absent_ then:
-    *
-    * * `plus(x, 3)` is _absent_.
-    * * `sum([x, 3])` is 3.
-    *
-    * @example
-    *
-    * Let's consider a set of optional tasks. Due to limited resources and time, only some of them can be executed. Every task has a profit, and we want to maximize the total profit from the executed tasks.
-    *
-    * ```ts
-    * // Lengths and profits of the tasks:
-    * const lengths = [10, 20, 15, 30, 20, 25, 30, 10, 20, 25];
-    * const profits = [ 5,  6,  7,  8,  9, 10, 11, 12, 13, 14];
-    *
-    * let model = new CP.Model;
-    * let tasks: CP.IntervalVar[] = [];
-    * // Profits of individual tasks. The value will be zero if the task is not executed.
-    * let taskProfits: CP.IntExpr[] = [];
-    *
-    * for (let i = 0; i < lengths.length; i++) {
-    *   // All tasks must finish before time 100:
-    *   let task = model.intervalVar({ name: "Task" + i, optional: true, length: lengths[i], end: [, 100]});
-    *   tasks.push(task);
-    *   taskProfits.push(model.times(task.presence(), profits[i]));
-    * }
-    * model.sum(taskProfits).maximize();
-    * // Tasks cannot overlap:
-    * model.noOverlap(tasks);
-    *
-    * let result = await CP.solve(model, { searchType: "FDS" });
-    * ```
-    *  */
-    sum(args) {
-        let outParams = [this._getIntExprArray(args)];
-        return new IntExpr(this, "intSum", outParams);
-    }
-    /**
-    * Creates an integer expression for the maximum of the arguments.
-    *
-    * @remarks
-    *
-    * Absent arguments are ignored as if they were not specified in the input array `args`. Maximum of an empty set (i.e. `max([])` is _absent_. The maximum is _absent_ also if all arguments are _absent_.
-    *
-    * Note that binary function {@link Model.max2} handles absent values differently. For example, when `x` is _absent_ then:
-    *
-    * * `max2(x, 5)` is _absent_.
-    * * `max([x, 5])` is 5.
-    * * `max([x])` is _absent_.
-    *
-    * @example
-    *
-    * A common use case is to compute _makespan_ of a set of tasks, i.e. the time when the last task finishes. In the following example, we minimize the makespan of a set of tasks (other parts of the model are omitted).
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let tasks: CP.IntervalVar[] = ...;
-    * ...
-    * // Create an array of end times of the tasks:
-    * let endTimes = tasks.map(task => task.end());
-    * let makespan = model.max(endTimes);
-    * model.minimize(makespan);
-    * ```
-    * Notice that when a task is _absent_ (not executed), then its end time is _absent_. And therefore, the absent task is not included in the maximum.
-    *
-    * @see Binary {@link Model.max2}.
-    * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
-    *
-    *  */
+     * Creates an integer expression for the maximum of the arguments.
+     *
+     * @param args Array of integer expressions to compute maximum of.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * Absent arguments are ignored as if they were not specified in the input array `args`. Maximum of an empty set (i.e. `max([])` is *absent*. The maximum is *absent* also if all arguments are *absent*.
+     *
+     * Note that binary function {@link Model.max2} handles absent values differently. For example, when `x` is *absent* then:
+     *
+     * * `max2(x, 5)` is *absent*.
+     * * `max([x, 5])` is 5.
+     * * `max([x])` is *absent*.
+     *
+     * @example
+     *
+     * A common use case is to compute _makespan_ of a set of tasks, i.e. the time when the last task finishes. In the following example, we minimize the makespan of a set of tasks (other parts of the model are omitted).
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let tasks: CP.IntervalVar[] = ...;
+     * ...
+     * // Create an array of end times of the tasks:
+     * let endTimes = tasks.map(task => task.end());
+     * let makespan = model.max(endTimes);
+     * model.minimize(makespan);
+     * ```
+     *
+     * Notice that when a task is *absent* (not executed), then its end time is *absent*. And therefore, the absent task is not included in the maximum.
+     *
+     * @see Binary {@link Model.max2}.
+     * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
+     */
     max(args) {
         let outParams = [this._getIntExprArray(args)];
-        return new IntExpr(this, "intMax", outParams);
+        return IntExpr._Create(this, "intMax", outParams);
     }
     /**
-    * Creates an integer expression for the minimum of the arguments.
-    *
-    * @remarks
-    *
-    * Absent arguments are ignored as if they were not specified in the input array `args`. Minimum of an empty set (i.e. `min([])` is _absent_. The minimum is _absent_ also if all arguments are _absent_.
-    *
-    * Note that binary function {@link Model.min2} handles absent values differently. For example, when `x` is _absent_ then:
-    *
-    * * `min2(x, 5)` is _absent_.
-    * * `min([x, 5])` is 5.
-    * * `min([x])` is _absent_.
-    *
-    * @example
-    *
-    * In the following example, we compute the time when the first task of `tasks` starts, i.e. the minimum of the starting times.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let tasks: CP.IntervalVar[] = ...;
-    * ...
-    * // Create an array of start times of the tasks:
-    * let startTimes = tasks.map(task => task.start());
-    * let firstStartTime = model.min(startTimes);
-    * ```
-    * Notice that when a task is _absent_ (not executed), its end time is _absent_. And therefore, the absent task is not included in the minimum.
-    *
-    * @see Binary {@link Model.min2}.
-    * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
-    *
-    *  */
+     * Creates an integer expression for the minimum of the arguments.
+     *
+     * @param args Array of integer expressions to compute minimum of.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * Absent arguments are ignored as if they were not specified in the input array `args`. Minimum of an empty set (i.e. `min([])`) is *absent*. The minimum is *absent* also if all arguments are *absent*.
+     *
+     * Note that binary function {@link Model.min2} handles absent values differently. For example, when `x` is *absent* then:
+     *
+     * * `min2(x, 5)` is *absent*.
+     * * `min([x, 5])` is 5.
+     * * `min([x])` is *absent*.
+     *
+     * @example
+     *
+     * In the following example, we compute the time when the first task of `tasks` starts, i.e. the minimum of the starting times.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let tasks: CP.IntervalVar[] = ...;
+     * ...
+     * // Create an array of start times of the tasks:
+     * let startTimes = tasks.map(task => task.start());
+     * let firstStartTime = model.min(startTimes);
+     * ```
+     *
+     * Notice that when a task is *absent* (not executed), its end time is *absent*. And therefore, the absent task is not included in the minimum.
+     *
+     * @see Binary {@link Model.min2}.
+     * @see Function {@link Model.span} constraints interval variable to start and end at minimum and maximum of the given set of intervals.
+     */
     min(args) {
         let outParams = [this._getIntExprArray(args)];
-        return new IntExpr(this, "intMin", outParams);
+        return IntExpr._Create(this, "intMin", outParams);
     }
     /** @internal */
     _intPresentLinearExpr(coefficients, expressions, constantTerm = 0) {
         let outParams = [this._getIntArray(coefficients), this._getIntExprArray(expressions), GetInt(constantTerm)];
-        return new IntExpr(this, "intPresentLinearExpr", outParams);
+        return IntExpr._Create(this, "intPresentLinearExpr", outParams);
     }
     /** @internal */
     _intOptionalLinearExpr(coefficients, expressions, constantTerm = 0) {
         let outParams = [this._getIntArray(coefficients), this._getIntExprArray(expressions), GetInt(constantTerm)];
-        return new IntExpr(this, "intOptionalLinearExpr", outParams);
+        return IntExpr._Create(this, "intOptionalLinearExpr", outParams);
     }
     /** @internal */
     _count(expressions, value) {
         let outParams = [this._getIntExprArray(expressions), GetInt(value)];
-        return new IntExpr(this, "intCount", outParams);
+        return IntExpr._Create(this, "intCount", outParams);
     }
     /** @internal */
     _element(array, subscript) {
         let outParams = [this._getIntArray(array), GetIntExpr(subscript)];
-        return new IntExpr(this, "intElement", outParams);
+        return IntExpr._Create(this, "intElement", outParams);
     }
     /** @internal */
     _exprElement(expressions, subscript) {
         let outParams = [this._getIntExprArray(expressions), GetIntExpr(subscript)];
-        return new IntExpr(this, "intExprElement", outParams);
+        return IntExpr._Create(this, "intExprElement", outParams);
     }
     /** @internal */
-    _floatIdentity(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        new Constraint(this, "floatIdentity", outParams);
+    _floatIdentity(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return Constraint._Create(this, "floatIdentity", outParams);
     }
     /** @internal */
     _floatGuard(arg, absentValue = 0) {
         let outParams = [GetFloatExpr(arg), GetFloat(absentValue)];
-        return new FloatExpr(this, "floatGuard", outParams);
+        return FloatExpr._Create(this, "floatGuard", outParams);
     }
     /** @internal */
     _floatNeg(arg) {
         let outParams = [GetFloatExpr(arg)];
-        return new FloatExpr(this, "floatNeg", outParams);
+        return FloatExpr._Create(this, "floatNeg", outParams);
     }
     /** @internal */
-    _floatPlus(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatPlus", outParams);
+    _floatPlus(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatPlus", outParams);
     }
     /** @internal */
-    _floatMinus(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatMinus", outParams);
+    _floatMinus(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatMinus", outParams);
     }
     /** @internal */
-    _floatTimes(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatTimes", outParams);
+    _floatTimes(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatTimes", outParams);
     }
     /** @internal */
-    _floatDiv(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatDiv", outParams);
+    _floatDiv(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatDiv", outParams);
     }
     /** @internal */
-    _floatEq(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatEq", outParams);
+    _floatEq(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatEq", outParams);
     }
     /** @internal */
-    _floatNe(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatNe", outParams);
+    _floatNe(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatNe", outParams);
     }
     /** @internal */
-    _floatLt(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatLt", outParams);
+    _floatLt(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatLt", outParams);
     }
     /** @internal */
-    _floatLe(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatLe", outParams);
+    _floatLe(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatLe", outParams);
     }
     /** @internal */
-    _floatGt(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatGt", outParams);
+    _floatGt(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatGt", outParams);
     }
     /** @internal */
-    _floatGe(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new BoolExpr(this, "floatGe", outParams);
+    _floatGe(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return BoolExpr._Create(this, "floatGe", outParams);
     }
     /** @internal */
     _floatInRange(arg, lb, ub) {
         let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
-        return new BoolExpr(this, "floatInRange", outParams);
+        return BoolExpr._Create(this, "floatInRange", outParams);
     }
     /** @internal */
     _floatNotInRange(arg, lb, ub) {
         let outParams = [GetFloatExpr(arg), GetFloat(lb), GetFloat(ub)];
-        return new BoolExpr(this, "floatNotInRange", outParams);
+        return BoolExpr._Create(this, "floatNotInRange", outParams);
     }
     /** @internal */
     _floatAbs(arg) {
         let outParams = [GetFloatExpr(arg)];
-        return new FloatExpr(this, "floatAbs", outParams);
+        return FloatExpr._Create(this, "floatAbs", outParams);
     }
     /** @internal */
     _floatSquare(arg) {
         let outParams = [GetFloatExpr(arg)];
-        return new FloatExpr(this, "floatSquare", outParams);
+        return FloatExpr._Create(this, "floatSquare", outParams);
     }
     /** @internal */
-    _floatMin2(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatMin2", outParams);
+    _floatMin2(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatMin2", outParams);
     }
     /** @internal */
-    _floatMax2(arg1, arg2) {
-        let outParams = [GetFloatExpr(arg1), GetFloatExpr(arg2)];
-        return new FloatExpr(this, "floatMax2", outParams);
+    _floatMax2(lhs, rhs) {
+        let outParams = [GetFloatExpr(lhs), GetFloatExpr(rhs)];
+        return FloatExpr._Create(this, "floatMax2", outParams);
     }
     /** @internal */
     _floatSum(args) {
         let outParams = [this._getFloatExprArray(args)];
-        return new FloatExpr(this, "floatSum", outParams);
+        return FloatExpr._Create(this, "floatSum", outParams);
     }
     /** @internal */
     _floatMax(args) {
         let outParams = [this._getFloatExprArray(args)];
-        return new FloatExpr(this, "floatMax", outParams);
+        return FloatExpr._Create(this, "floatMax", outParams);
     }
     /** @internal */
     _floatMin(args) {
         let outParams = [this._getFloatExprArray(args)];
-        return new FloatExpr(this, "floatMin", outParams);
+        return FloatExpr._Create(this, "floatMin", outParams);
     }
     /** @internal */
     _floatPresentLinearExpr(coefficients, expressions, constantTerm) {
         let outParams = [this._getFloatArray(coefficients), this._getFloatExprArray(expressions), GetFloat(constantTerm)];
-        return new FloatExpr(this, "floatPresentLinearExpr", outParams);
+        return FloatExpr._Create(this, "floatPresentLinearExpr", outParams);
     }
     /** @internal */
     _floatOptionalLinearExpr(coefficients, expressions, constantTerm) {
         let outParams = [this._getFloatArray(coefficients), this._getFloatExprArray(expressions), GetFloat(constantTerm)];
-        return new FloatExpr(this, "floatOptionalLinearExpr", outParams);
+        return FloatExpr._Create(this, "floatOptionalLinearExpr", outParams);
     }
     /** @internal */
     _floatElement(array, subscript) {
         let outParams = [this._getFloatArray(array), GetIntExpr(subscript)];
-        return new FloatExpr(this, "floatElement", outParams);
+        return FloatExpr._Create(this, "floatElement", outParams);
     }
-    /** @internal */
+    /**
+     * Lexicographic less than or equal constraint: `lhs` ≤ `rhs`.
+     *
+     * @param lhs The left-hand side array of integer expressions.
+     * @param rhs The right-hand side array of integer expressions.
+     *
+     * @returns The lexicographic constraint.
+     *
+     * @remarks
+     * Constrains `lhs` to be lexicographically less than or equal `rhs`.
+     *
+     * Both arrays must have the same length, and the length must be at least 1.
+     *
+     * Lexicographic ordering compares arrays element by element from the first
+     * position. The comparison `lhs` ≤ `rhs` holds if and only if:
+     *
+     * * all elements are equal (`lhs[i] == rhs[i]` for all `i`), or
+     * * there exists a position `k` where `lhs[k] < rhs[k]` and all preceding elements are equal (`lhs[i] == rhs[i]` for all `i < k`)
+     *
+     * Lexicographic constraints are useful for symmetry breaking. For example, when
+     * you have multiple equivalent solutions that differ only in the ordering of
+     * symmetric variables, adding a lexicographic constraint can eliminate redundant
+     * solutions.
+     *
+     * @example
+     *
+     * ```ts
+     * const model = new CP.Model();
+     *
+     * // Variables for a 3x3 matrix where rows should be lexicographically ordered
+     * const rows = Array.from({ length: 3 }, (_, i) =>
+     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     * );
+     *
+     * // Break row symmetry: row[0] ≤ row[1] ≤ row[2] lexicographically
+     * model.lexLe(rows[0], rows[1]);
+     * model.lexLe(rows[1], rows[2]);
+     * ```
+     *
+     * @see {@link Model.lexLt}, {@link Model.lexGe}, {@link Model.lexGt} for other lexicographic comparisons.
+     */
     lexLe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        new Constraint(this, "intLexLe", outParams);
+        return Constraint._Create(this, "intLexLe", outParams);
     }
-    /** @internal */
+    /**
+     * Lexicographic strictly less than constraint: `lhs` < `rhs`.
+     *
+     * @param lhs The left-hand side array of integer expressions.
+     * @param rhs The right-hand side array of integer expressions.
+     *
+     * @returns The lexicographic constraint.
+     *
+     * @remarks
+     * Constrains `lhs` to be lexicographically strictly less than `rhs`.
+     *
+     * Both arrays must have the same length, and the length must be at least 1.
+     *
+     * Lexicographic ordering compares arrays element by element from the first
+     * position. The comparison `lhs` < `rhs` holds if and only if:
+     * there exists a position `k` where `lhs[k] < rhs[k]` and all preceding elements are equal (`lhs[i] == rhs[i]` for all `i < k`)
+     *
+     * Lexicographic constraints are useful for symmetry breaking. For example, when
+     * you have multiple equivalent solutions that differ only in the ordering of
+     * symmetric variables, adding a lexicographic constraint can eliminate redundant
+     * solutions.
+     *
+     * @example
+     *
+     * ```ts
+     * const model = new CP.Model();
+     *
+     * // Variables for a 3x3 matrix where rows should be lexicographically ordered
+     * const rows = Array.from({ length: 3 }, (_, i) =>
+     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     * );
+     *
+     * // Break row symmetry: row[0] < row[1] < row[2] lexicographically
+     * model.lexLt(rows[0], rows[1]);
+     * model.lexLt(rows[1], rows[2]);
+     * ```
+     *
+     * @see {@link Model.lexLe}, {@link Model.lexGe}, {@link Model.lexGt} for other lexicographic comparisons.
+     */
     lexLt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        new Constraint(this, "intLexLt", outParams);
+        return Constraint._Create(this, "intLexLt", outParams);
     }
-    /** @internal */
+    /**
+     * Lexicographic greater than or equal constraint: `lhs` ≥ `rhs`.
+     *
+     * @param lhs The left-hand side array of integer expressions.
+     * @param rhs The right-hand side array of integer expressions.
+     *
+     * @returns The lexicographic constraint.
+     *
+     * @remarks
+     * Constrains `lhs` to be lexicographically greater than or equal `rhs`.
+     *
+     * Both arrays must have the same length, and the length must be at least 1.
+     *
+     * Lexicographic ordering compares arrays element by element from the first
+     * position. The comparison `lhs` ≥ `rhs` holds if and only if:
+     *
+     * * all elements are equal (`lhs[i] == rhs[i]` for all `i`), or
+     * * there exists a position `k` where `lhs[k] > rhs[k]` and all preceding elements are equal (`lhs[i] == rhs[i]` for all `i < k`)
+     *
+     * Lexicographic constraints are useful for symmetry breaking. For example, when
+     * you have multiple equivalent solutions that differ only in the ordering of
+     * symmetric variables, adding a lexicographic constraint can eliminate redundant
+     * solutions.
+     *
+     * @example
+     *
+     * ```ts
+     * const model = new CP.Model();
+     *
+     * // Variables for a 3x3 matrix where rows should be lexicographically ordered
+     * const rows = Array.from({ length: 3 }, (_, i) =>
+     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     * );
+     *
+     * // Break row symmetry: row[0] ≥ row[1] ≥ row[2] lexicographically
+     * model.lexGe(rows[0], rows[1]);
+     * model.lexGe(rows[1], rows[2]);
+     * ```
+     *
+     * @see {@link Model.lexLe}, {@link Model.lexLt}, {@link Model.lexGt} for other lexicographic comparisons.
+     */
     lexGe(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        new Constraint(this, "intLexGe", outParams);
+        return Constraint._Create(this, "intLexGe", outParams);
     }
-    /** @internal */
+    /**
+     * Lexicographic strictly greater than constraint: `lhs` > `rhs`.
+     *
+     * @param lhs The left-hand side array of integer expressions.
+     * @param rhs The right-hand side array of integer expressions.
+     *
+     * @returns The lexicographic constraint.
+     *
+     * @remarks
+     * Constrains `lhs` to be lexicographically strictly greater than `rhs`.
+     *
+     * Both arrays must have the same length, and the length must be at least 1.
+     *
+     * Lexicographic ordering compares arrays element by element from the first
+     * position. The comparison `lhs` > `rhs` holds if and only if:
+     * there exists a position `k` where `lhs[k] > rhs[k]` and all preceding elements are equal (`lhs[i] == rhs[i]` for all `i < k`)
+     *
+     * Lexicographic constraints are useful for symmetry breaking. For example, when
+     * you have multiple equivalent solutions that differ only in the ordering of
+     * symmetric variables, adding a lexicographic constraint can eliminate redundant
+     * solutions.
+     *
+     * @example
+     *
+     * ```ts
+     * const model = new CP.Model();
+     *
+     * // Variables for a 3x3 matrix where rows should be lexicographically ordered
+     * const rows = Array.from({ length: 3 }, (_, i) =>
+     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     * );
+     *
+     * // Break row symmetry: row[0] > row[1] > row[2] lexicographically
+     * model.lexGt(rows[0], rows[1]);
+     * model.lexGt(rows[1], rows[2]);
+     * ```
+     *
+     * @see {@link Model.lexLe}, {@link Model.lexLt}, {@link Model.lexGe} for other lexicographic comparisons.
+     */
     lexGt(lhs, rhs) {
         let outParams = [this._getIntExprArray(lhs), this._getIntExprArray(rhs)];
-        new Constraint(this, "intLexGt", outParams);
+        return Constraint._Create(this, "intLexGt", outParams);
     }
     /**
-    * Creates an integer expression for the start of an interval variable.
-    *
-    * @remarks
-    *
-    * If the interval is absent, the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(model.endOf(x).plus(10).le(model.startOf(y)));
-    * model.constraint(model.lengthOf(x).le(model.lengthOf(y)));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link IntervalVar.start} is equivalent function on {@link IntervalVar}.
-    * @see Function {@link Model.startOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
-    startOf(interval) {
+     * Creates an integer expression for the start time of an interval variable.
+     *
+     * @param interval The interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval is absent, the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(model.end(x).plus(10).le(model.start(y)));
+     * model.enforce(model.length(x).le(model.length(y)));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link IntervalVar.start} is equivalent function on {@link IntervalVar}.
+     */
+    start(interval) {
         let outParams = [GetIntervalVar(interval)];
-        return new IntExpr(this, "startOf", outParams);
+        return IntExpr._Create(this, "startOf", outParams);
     }
     /**
-    * Creates an integer expression for the end of an interval variable.
-    *
-    * @remarks
-    *
-    * If the interval is absent, the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(model.endOf(x).plus(10).le(model.startOf(y)));
-    * model.constraint(model.lengthOf(x).le(model.lengthOf(y)));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link IntervalVar.end} is equivalent function on {@link IntervalVar}.
-    * @see Function {@link Model.endOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
-    endOf(interval) {
+     * Creates an integer expression for the end time of an interval variable.
+     *
+     * @param interval The interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval is absent, the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(model.end(x).plus(10).le(model.start(y)));
+     * model.enforce(model.length(x).le(model.length(y)));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link IntervalVar.end} is equivalent function on {@link IntervalVar}.
+     */
+    end(interval) {
         let outParams = [GetIntervalVar(interval)];
-        return new IntExpr(this, "endOf", outParams);
+        return IntExpr._Create(this, "endOf", outParams);
     }
     /**
-    * Creates an integer expression for the length of an interval variable.
-    *
-    * @remarks
-    *
-    * If the interval is absent, the resulting expression is also absent.
-    *
-    * @example
-    *
-    * In the following example, we constraint interval variable `y` to start after the end of `y` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    * let x = model.intervalVar({ name: "x", ... });
-    * let y = model.intervalVar({ name: "y", ... });
-    * model.constraint(model.endOf(x).plus(10).le(model.startOf(y)));
-    * model.constraint(model.lengthOf(x).le(model.lengthOf(y)));
-    * ```
-    *
-    * When `x` or `y` is _absent_ then value of both constraints above is _absent_ and therefore they are satisfied.
-    *
-    * @see {@link IntervalVar.length} is equivalent function on {@link IntervalVar}.
-    * @see Function {@link Model.lengthOr} is a similar function that replaces value _absent_ by a constant.
-    *  */
-    lengthOf(interval) {
+     * Creates an integer expression for the duration (end - start) of an interval variable.
+     *
+     * @param interval The interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * If the interval is absent, the resulting expression is also absent.
+     *
+     * @example
+     *
+     * In the following example, we constrain interval variable `y` to start after the end of `x` with a delay of at least 10. In addition, we constrain the length of `x` to be less or equal to the length of `y`.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let x = model.intervalVar({ name: "x", ... });
+     * let y = model.intervalVar({ name: "y", ... });
+     * model.enforce(model.end(x).plus(10).le(model.start(y)));
+     * model.enforce(model.length(x).le(model.length(y)));
+     * ```
+     *
+     * When `x` or `y` is *absent* then value of both constraints above is *absent* and therefore they are satisfied.
+     *
+     * @see {@link IntervalVar.length} is equivalent function on {@link IntervalVar}.
+     */
+    length(interval) {
         let outParams = [GetIntervalVar(interval)];
-        return new IntExpr(this, "lengthOf", outParams);
+        return IntExpr._Create(this, "lengthOf", outParams);
     }
     /**
-    * Creates an integer expression for the start of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `startOf(interval).guard(absentValue)`.
-    *
-    * @see {@link Model.startOf}
-    * @see {@link Model.guard}
-    *  */
+     * Creates an integer expression for the start time of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param interval The interval variable.
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `startOr(interval).guard(absentValue)`.
+     *
+     * @see {@link Model.startOr}
+     * @see {@link Model.guard}
+     */
     startOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        return new IntExpr(this, "startOr", outParams);
+        return IntExpr._Create(this, "startOr", outParams);
     }
     /**
-    * Creates an integer expression for the end of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `endOf(interval).guard(absentValue)`.
-    *
-    * @see {@link Model.endOf}
-    * @see {@link Model.guard}
-    *  */
+     * Creates an integer expression for the end time of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param interval The interval variable.
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `endOr(interval).guard(absentValue)`.
+     *
+     * @see {@link Model.endOr}
+     * @see {@link Model.guard}
+     */
     endOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        return new IntExpr(this, "endOr", outParams);
+        return IntExpr._Create(this, "endOr", outParams);
     }
     /**
-    * Creates an integer expression for the length of the interval variable. If the interval is absent, then its value is `absentValue`.
-    *
-    * @remarks
-    *
-    * This function is equivalent to `lengthOf(interval).guard(absentValue)`.
-    *
-    * @see {@link Model.lengthOf}
-    * @see {@link Model.guard}
-    *  */
+     * Creates an integer expression for the duration (end - start) of the interval variable. If the interval is absent, then its value is `absentValue`.
+     *
+     * @param interval The interval variable.
+     * @param absentValue The value to use when the interval is absent.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * This function is equivalent to `lengthOr(interval).guard(absentValue)`.
+     *
+     * @see {@link Model.lengthOr}
+     * @see {@link Model.guard}
+     */
     lengthOr(interval, absentValue) {
         let outParams = [GetIntervalVar(interval), GetInt(absentValue)];
-        return new IntExpr(this, "lengthOr", outParams);
+        return IntExpr._Create(this, "lengthOr", outParams);
     }
     /** @internal */
     _overlapLength(interval1, interval2) {
         let outParams = [GetIntervalVar(interval1), GetIntervalVar(interval2)];
-        return new IntExpr(this, "overlapLength", outParams);
+        return IntExpr._Create(this, "overlapLength", outParams);
     }
     /** @internal */
     _alternativeCost(main, options, weights) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options), this._getIntArray(weights)];
-        return new IntExpr(this, "intAlternativeCost", outParams);
+        return IntExpr._Create(this, "intAlternativeCost", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).le(successor.end())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.endBeforeEnd | IntervalVar.endBeforeEnd}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).le(successor.end())).
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be less than or equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.endBeforeEnd} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     endBeforeEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "endBeforeEnd", outParams);
+        return Constraint._Create(this, "endBeforeEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).le(successor.start())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.endBeforeStart | IntervalVar.endBeforeStart}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).le(successor.start())).
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be less than or equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.endBeforeStart} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     endBeforeStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "endBeforeStart", outParams);
+        return Constraint._Create(this, "endBeforeStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).le(successor.end())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.startBeforeEnd | IntervalVar.startBeforeEnd}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).le(successor.end())).
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be less than or equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.startBeforeEnd} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     startBeforeEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "startBeforeEnd", outParams);
+        return Constraint._Create(this, "startBeforeEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).le(successor.start())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.startBeforeStart | IntervalVar.startBeforeStart}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.le}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).le(successor.start())).
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be less than or equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.startBeforeStart} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.le}
+     */
     startBeforeStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "startBeforeStart", outParams);
+        return Constraint._Create(this, "startBeforeStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).eq(successor.end())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.endAtEnd | IntervalVar.endAtEnd}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).eq(successor.end())).
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.endAtEnd} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     endAtEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "endAtEnd", outParams);
+        return Constraint._Create(this, "endAtEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.end().plus(delay).eq(successor.start())).
-    * ```
-    *
-    * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.endAtStart | IntervalVar.endAtStart}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.end().plus(delay).eq(successor.start())).
+     * ```
+     *
+     * In other words, end of `predecessor` plus `delay` must be equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.endAtStart} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     endAtStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "endAtStart", outParams);
+        return Constraint._Create(this, "endAtStart", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).eq(successor.end())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.startAtEnd | IntervalVar.startAtEnd}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).eq(successor.end())).
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be equal to end of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.startAtEnd} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     startAtEnd(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "startAtEnd", outParams);
+        return Constraint._Create(this, "startAtEnd", outParams);
     }
     /**
-    * Creates a precedence constraint between two interval variables.
-    *
-    * @remarks
-    *
-    * Same as:
-    *
-    * ```ts
-    * model.constraint(predecessor.start().plus(delay).eq(successor.start())).
-    * ```
-    *
-    * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
-    *
-    * When one of the two interval variables is absent, then the constraint is satisfied.
-    *
-    * @see {@link IntervalVar.startAtStart | IntervalVar.startAtStart}      is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.constraint}
-    * @see {@link IntervalVar.start}, {@link IntervalVar.end}
-    * @see {@link IntExpr.eq}
-    *  */
+     * Creates a precedence constraint between two interval variables.
+     *
+     * @param predecessor The predecessor interval variable.
+     * @param successor The successor interval variable.
+     * @param delay The minimum delay between intervals.
+     *
+     * @returns The precedence constraint.
+     *
+     * @remarks
+     * Same as:
+     *
+     * ```ts
+     * model.enforce(predecessor.start().plus(delay).eq(successor.start())).
+     * ```
+     *
+     * In other words, start of `predecessor` plus `delay` must be equal to start of `successor`.
+     *
+     * When one of the two interval variables is absent, then the constraint is satisfied.
+     *
+     * @see {@link IntervalVar.startAtStart} is equivalent function on {@link IntervalVar}.
+     * @see {@link IntervalVar.start}, {@link IntervalVar.end}
+     *
+     * @see {@link IntExpr.eq}
+     */
     startAtStart(predecessor, successor, delay = 0) {
         let outParams = [GetIntervalVar(predecessor), GetIntervalVar(successor), GetIntExpr(delay)];
-        new Constraint(this, "startAtStart", outParams);
+        return Constraint._Create(this, "startAtStart", outParams);
     }
     /**
-    * Creates alternative constraint between interval variables.
-    *
-    * @param main The main interval variable.
-    * @param options Array of optional interval variables to choose from.
-    *
-    * @remarks
-    *
-    * Alternative constraint is a way to model various kinds of choices. For example, we can model a task that could be done by worker A, B, or C. To model such alternative, we use interval variable `main` that represents the task regardless the chosen worker and three interval variables `options = [A, B, C]` that represent the task when done by worker A, B, or C. Interval variables `A`, `B`, and `C` should be optional. This way, if e.g. option B is chosen, then `B` will be _present_ and equal to `main` (they will start at the same time and end at the same time), the remaining options, A and C, will be _absent_.
-    *
-    * We may also decide not to execute the `main` task at all (if it is optional). Then `main` will be _absent_ and all options `A`, `B` and `C` will be _absent_ too.
-    *
-    * #### Formal definition
-    *
-    * The constraint `alternative(main, options)` is satisfied in the following two cases:
-    * 1. Interval `main` is _absent_ and all `options[i]` are _absent_ too.
-    * 2. Interval `main` is _present_ and exactly one of `options[i]` is _present_ (the remaining options are _absent_).    Let `k` be the index of the present option.    Then `main.start() == options[k].start()` and `main.end() == options[k].end()`.
-    *
-    * @example
-    *
-    * Let's consider task T, which can be done by workers A, B, or C. The length of the task and a cost associated with it depends on the chosen worker:
-    *
-    * * If done by worker A, then its length is 10, and the cost is 5.
-    * * If done by worker B, then its length is 20, and the cost is 2.
-    * * If done by worker C, then its length is 3, and the cost is 10.
-    *
-    * Each worker can execute only one task at a time. However, the remaining tasks are omitted in the model below. The objective could be, e.g., to minimize the total cost (also omitted in the model).
-    *
-    * ```ts
-    * let model = new CP.Model;
-    *
-    * let T = model.intervalVar({ name: "T" });
-    * let T_A = model.intervalVar({ name: "T_A", optional: true, length: 10 });
-    * let T_B = model.intervalVar({ name: "T_B", optional: true, length: 20 });
-    * let T_C = model.intervalVar({ name: "T_C", optional: true, length: 3 });
-    *
-    * // T_A, T_B and T_C are different ways to execute task T:
-    * model.alternative(T, [T_A, T_B, T_C]);
-    * // The cost depends on the chosen option:
-    * let costOfT = model.sum([
-    *   T_A.presence().times(5),
-    *   T_B.presence().times(2),
-    *   T_C.presence().times(10)
-    * ]);
-    *
-    * // Each worker A can perform only one task at a time:
-    * model.noOverlap([T_A, ...]);  // Worker A
-    * model.noOverlap([T_B, ...]);  // Worker B
-    * model.noOverlap([T_C, ...]);  // Worker C
-    *
-    * // Minimize the total cost:
-    * model.sum([costOfT, ...]).minimize();
-    * ```
-    *
-    *  */
+     * Alternative constraint models a choice between different ways to execute an interval.
+     *
+     * @param main The main interval variable.
+     * @param options Array of optional interval variables to choose from.
+     *
+     * @returns The alternative constraint.
+     *
+     * @remarks
+     * Alternative constraint is a way to model various kinds of choices. For example, we can model a task that could be done by worker A, B, or C. To model such alternative, we use interval variable `main` that represents the task regardless the chosen worker and three interval variables `options = [A, B, C]` that represent the task when done by worker A, B, or C. Interval variables `A`, `B`, and `C` should be optional. This way, if e.g. option B is chosen, then `B` will be *present* and equal to `main` (they will start at the same time and end at the same time), the remaining options, A and C, will be *absent*.
+     *
+     * We may also decide not to execute the `main` task at all (if it is optional). Then `main` will be *absent* and all options `A`, `B` and `C` will be *absent* too.
+     *
+     * ### Formal definition
+     *
+     * The constraint `alternative(main, options)` is satisfied in the following two cases:
+     * 1. Interval `main` is *absent* and all `options[i]` are *absent* too.
+     * 2. Interval `main` is *present* and exactly one of `options[i]` is *present* (the remaining options are *absent*).    Let `k` be the index of the present option.    Then `main.start() == options[k].start()` and `main.end() == options[k].end()`.
+     *
+     * @example
+     *
+     * Let's consider task T, which can be done by workers A, B, or C. The length of the task and a cost associated with it depends on the chosen worker:
+     *
+     * * If done by worker A, then its length is 10, and the cost is 5.
+     * * If done by worker B, then its length is 20, and the cost is 2.
+     * * If done by worker C, then its length is 3, and the cost is 10.
+     *
+     * Each worker can execute only one task at a time. However, the remaining tasks are omitted in the model below. The objective could be, e.g., to minimize the total cost (also omitted in the model).
+     *
+     * ```ts
+     * let model = new CP.Model;
+     *
+     * let T = model.intervalVar({ name: "T" });
+     * let T_A = model.intervalVar({ name: "T_A", optional: true, length: 10 });
+     * let T_B = model.intervalVar({ name: "T_B", optional: true, length: 20 });
+     * let T_C = model.intervalVar({ name: "T_C", optional: true, length: 3 });
+     *
+     * // T_A, T_B and T_C are different ways to execute task T:
+     * model.alternative(T, [T_A, T_B, T_C]);
+     * // The cost depends on the chosen option:
+     * let costOfT = model.sum([
+     *   T_A.presence().times(5),
+     *   T_B.presence().times(2),
+     *   T_C.presence().times(10)
+     * ]);
+     *
+     * // Each worker A can perform only one task at a time:
+     * model.noOverlap([T_A, ...]);  // Worker A
+     * model.noOverlap([T_B, ...]);  // Worker B
+     * model.noOverlap([T_C, ...]);  // Worker C
+     *
+     * // Minimize the total cost:
+     * model.sum([costOfT, ...]).minimize();
+     * ```
+     */
     alternative(main, options) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(options)];
-        new Constraint(this, "alternative", outParams);
+        return Constraint._Create(this, "alternative", outParams);
     }
     /** @internal */
-    intervalVarElement(slots, index, value) {
+    _intervalVarElement(slots, index, value) {
         let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
-        new Constraint(this, "intervalVarElement", outParams);
+        return Constraint._Create(this, "intervalVarElement", outParams);
     }
     /** @internal */
-    increasingIntervalVarElement(slots, index, value) {
+    _increasingIntervalVarElement(slots, index, value) {
         let outParams = [this._getIntervalVarArray(slots), GetIntExpr(index), GetIntervalVar(value)];
-        new Constraint(this, "increasingIntervalVarElement", outParams);
+        return Constraint._Create(this, "increasingIntervalVarElement", outParams);
     }
-    /**
-    *
-    * Map `tasks` on `slots` according to the `indices` array.
-    *
-    * @param tasks Array of interval variables to map.
-    * @param slots Array of interval variables to map to.
-    * @param indices Array of integer expressions that specify the mapping (of the same length as `tasks`).
-    *
-    * @remarks
-    *
-    * Each task is synchronized with the slot it is assigned to. Multiple tasks can be
-    * assigned to the same slot. A slot without any task is _absent_. Absent tasks are
-    * not assigned to any slot (their index value is _absent_).  Slots are sorted by
-    * both start and end. Absent slots are at the end of the array.
-    *
-    * The constraint can be used to form batches of synchronized tasks (so-called
-    * _p-batching_). In this case `slots` corresponds to batches. The size of the
-    * batches can be limited using, e.g., {@link Model.pack} constraint.
-    *
-    * #### Formal definition
-    *
-    * Let $T$ be the number of tasks (the length of the
-    * array `tasks`). The number of the indices must also be $T$ (arrays `tasks` and
-    * `indices` must have the same length).  Let `tasks[t]` be one of the tasks, i.e.,
-    * $\mathtt{t} \in \{0,1,\dots T-1\}$. Then `indices[t]` is the index of the slot
-    * the task `tasks[t]` is assigned to.  Only present tasks are assigned:
-    * $$
-    * \mathtt{
-    *   \forall t \in \mathrm{ \{0,\dots,T-1\} }: \quad presenceOf(tasks[t]) \,\Leftrightarrow\, presenceOf(indices[t])
-    * }
-    * $$
-    * Each task is synchronized with the slot to which it is assigned:
-    * $$
-    * \begin{aligned}
-    * \mathtt{\forall t \in \mathrm{ \{0,\dots,T-1\} } \text{ such that } tasks[t] \ne \text{absent:}} \\
-    *     \mathtt{slots[indices[t]]} &\ne \textrm{absent} \\
-    *     \mathtt{startOf(tasks[t])} &= \mathtt{startOf(slots[indices[t]]) }\\
-    *     \mathtt{endOf(tasks[t])} &= \mathtt{endOf(slots[indices[t]])}
-    * \end{aligned}
-    * $$
-    * A slot is present if and only if there is a task assigned to it:
-    * $$
-    * \forall \mathtt{s} \in \{0,\dots,S-1\}:\;
-    * \mathtt{presenceOf(tasks[s])} \;\Leftrightarrow\; (\exists \mathtt{t} \in 0,\dots,T-1: \mathtt{indices[t]=s})
-    * $$
-    * Absent slots are positioned at the end of the array:
-    * $$
-    * \mathtt{
-    *    \forall s \in \mathrm{ \{1,\dots,S-1\} }:\, presenceOf(slots[s]) \Rightarrow presenceOf(slots[s-1])
-    * }
-    * $$
-    * Present slots are sorted by both start and end:
-    * $$
-    * \begin{aligned}
-    * \mathtt{\forall s \in \mathrm{1,\dots,S-1} \text{ such that } slots[s] \ne \text{absent:}} \\
-    *     \mathtt{startOf(slots[s-1])} &\le \mathtt{startOf(slots[s]) }
-    *     \\
-    *     \mathtt{endOf(slots[s-1])} &\le \mathtt{endOf(slots[s])}
-    * \end{aligned}
-    * $$
-    *
-    * The amount of the propagation for this constraint can be controlled by parameter
-    * {@link Parameters.itvMappingPropagationLevel}.
-    *
-    * @see {@link Model.pack} for limiting the amount of tasks assigned to a slot.
-    *  */
-    itvMapping(tasks, slots, indices) {
+    /** @internal */
+    _itvMapping(tasks, slots, indices) {
         let outParams = [this._getIntervalVarArray(tasks), this._getIntervalVarArray(slots), this._getIntExprArray(indices)];
-        new Constraint(this, "itvMapping", outParams);
+        return Constraint._Create(this, "itvMapping", outParams);
     }
     /**
-    * Constraints an interval variable to span (cover) a set of other interval variables.
-    *
-    * @param main The spanning interval variable.
-    * @param covered The set of interval variables to cover.
-    *
-    * @remarks
-    *
-    * Span constraint can be used to model, for example, a composite task that consists of several subtasks.
-    *
-    * The constraint makes sure that interval variable `main` starts with the first interval in `covered` and ends with the last interval in `covered`. Absent interval variables in `covered` are ignored.
-    *
-    * #### Formal definition
-    *
-    * Span constraint is satisfied in one of the following two cases:
-    *
-    * * Interval variable `main` is absent and all interval variables in `covered` are absent too.
-    * * Interval variable `main` is present, at least one interval in `covered` is present and:
-    *
-    *    * `main.start()` is equal to the minimum starting time of all present intervals in `covered`.
-    *    * `main.end()` is equal to the maximum ending time of all present intervals in `covered`.
-    *
-    * @example
-    *
-    * Let's consider composite task `T`, which consists of 3 subtasks: `T1`, `T2`, and `T3`. Subtasks are independent, could be processed in any order, and may overlap. However, task T is blocking a particular location, and no other task can be processed there. The location is blocked as soon as the first task from `T1`, `T2`, `T3` starts, and it remains blocked until the last one of them finishes.
-    *
-    * ```ts
-    * let model = new CP.Model;
-    *
-    * // Subtasks have known lengths:
-    * let T1 = model.intervalVar({ name: "T1", length: 10 });
-    * let T2 = model.intervalVar({ name: "T2", length: 5 });
-    * let T3 = model.intervalVar({ name: "T3", length: 15 });
-    * // The main task has unknown length though:
-    * let T = model.intervalVar({ name: "T" });
-    *
-    * // T spans/covers T1, T2 and T3:
-    * model.span(T, [T1, T2, T3]);
-    *
-    * // Tasks requiring the same location cannot overlap.
-    * // Other tasks are not included in the example, therefore '...' below:
-    * model.noOverlap([T, ...]);
-    * ```
-    *
-    * @see {@link IntervalVar.span | IntervalVar.span} is equivalent function on {@link IntervalVar}.
-    *  */
+     * Constrains an interval variable to span (cover) a set of other interval variables.
+     *
+     * @param main The spanning interval variable.
+     * @param covered The set of interval variables to cover.
+     *
+     * @returns The span constraint.
+     *
+     * @remarks
+     * Span constraint can be used to model, for example, a composite task that consists of several subtasks.
+     *
+     * The constraint makes sure that interval variable `main` starts with the first interval in `covered` and ends with the last interval in `covered`. Absent interval variables in `covered` are ignored.
+     *
+     * ### Formal definition
+     *
+     * Span constraint is satisfied in one of the following two cases:
+     *
+     * * Interval variable `main` is absent and all interval variables in `covered` are absent too.
+     * * Interval variable `main` is present, at least one interval in `covered` is present and:
+     *
+     *    * `main.start()` is equal to the minimum starting time of all present intervals in `covered`.
+     *    * `main.end()` is equal to the maximum ending time of all present intervals in `covered`.
+     *
+     * @example
+     *
+     * Let's consider composite task `T`, which consists of 3 subtasks: `T1`, `T2`, and `T3`. Subtasks are independent, could be processed in any order, and may overlap. However, task T is blocking a particular location, and no other task can be processed there. The location is blocked as soon as the first task from `T1`, `T2`, `T3` starts, and it remains blocked until the last one of them finishes.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     *
+     * // Subtasks have known lengths:
+     * let T1 = model.intervalVar({ name: "T1", length: 10 });
+     * let T2 = model.intervalVar({ name: "T2", length: 5 });
+     * let T3 = model.intervalVar({ name: "T3", length: 15 });
+     * // The main task has unknown length though:
+     * let T = model.intervalVar({ name: "T" });
+     *
+     * // T spans/covers T1, T2 and T3:
+     * model.span(T, [T1, T2, T3]);
+     *
+     * // Tasks requiring the same location cannot overlap.
+     * // Other tasks are not included in the example, therefore '...' below:
+     * model.noOverlap([T, ...]);
+     * ```
+     *
+     * @see {@link IntervalVar.span} is equivalent function on {@link IntervalVar}.
+     */
     span(main, covered) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(covered)];
-        new Constraint(this, "span", outParams);
+        return Constraint._Create(this, "span", outParams);
     }
     /** @internal */
     _noOverlap(sequence, transitions) {
         let outParams = [GetSequenceVar(sequence)];
         if (transitions !== undefined)
             outParams.push(this._getIntMatrix(transitions));
-        new Constraint(this, "noOverlap", outParams);
+        return Constraint._Create(this, "noOverlap", outParams);
     }
     /**
-    * Creates an expression equal to the position of the `interval` on the `sequence`.
-    *
-    * @remarks
-    *
-    * In the solution, the interval which is scheduled first has position 0, the second interval has position 1, etc. The position of an absent interval is `absent`.
-    *
-    * The `position` expression cannot be used with interval variables of possibly zero length (because the position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
-    *
-    * @see {@link IntervalVar.position | IntervalVar.position} is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.noOverlap} for constraints on overlapping intervals.
-    * @see {@link Model.sequenceVar} for creating sequence variables.
-    *  */
+     * Creates an expression equal to the position of the `interval` on the `sequence`.
+     *
+     * @param interval The interval variable.
+     * @param sequence The sequence variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * In the solution, the interval which is scheduled first has position 0, the second interval has position 1, etc. The position of an absent interval is `absent`.
+     *
+     * The `position` expression cannot be used with interval variables of possibly zero length (because the position of two simultaneous zero-length intervals would be undefined). Also, `position` cannot be used in case of {@link Model.noOverlap} constraint with transition times.
+     *
+     * @see {@link IntervalVar.position} is equivalent function on {@link IntervalVar}.
+     * @see {@link Model.noOverlap} for constraints on overlapping intervals.
+     * @see {@link Model.sequenceVar} for creating sequence variables.
+     */
     position(interval, sequence) {
         let outParams = [GetIntervalVar(interval), GetSequenceVar(sequence)];
-        return new IntExpr(this, "position", outParams);
+        return IntExpr._Create(this, "position", outParams);
     }
     /** @internal */
     _sameSequence(sequence1, sequence2) {
         let outParams = [GetSequenceVar(sequence1), GetSequenceVar(sequence2)];
-        new Constraint(this, "sameSequence", outParams);
+        return Constraint._Create(this, "sameSequence", outParams);
     }
     /** @internal */
     _sameSequenceGroup(sequences) {
         let outParams = [this._getSequenceVarArray(sequences)];
-        new Constraint(this, "sameSequenceGroup", outParams);
+        return Constraint._Create(this, "sameSequenceGroup", outParams);
     }
     /**
-    *
-    * Creates cumulative function (expression) _pulse_ for the given interval variable and height.
-    *
-    * @remarks
-    *
-    * Pulse can be used to model a resource requirement during an interval variable. The given amount `height` of the resource is used throughout the interval (from start to end).
-    *
-    * #### Formal definition
-    *
-    * Pulse creates a cumulative function which has the value:
-    *
-    * * `0` before `interval.start()`,
-    * * `height` between `interval.start()` and `interval.end()`,
-    * * `0` after `interval.end()`
-    *
-    * If `interval` is absent, the pulse is `0` everywhere.
-    *
-    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
-    *
-    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the pulse is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
-    *
-    * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
-    *
-    * @example
-    *
-    * Let us consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`nbWorkersNeeded`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
-    *
-    * ```ts
-    * // The input data:
-    * const nbWorkers = 3;
-    * const tasks = [
-    *   { length: 10, nbWorkersNeeded: 3},
-    *   { length: 20, nbWorkersNeeded: 2},
-    *   { length: 15, nbWorkersNeeded: 1},
-    *   { length: 30, nbWorkersNeeded: 2},
-    *   { length: 20, nbWorkersNeeded: 1},
-    *   { length: 25, nbWorkersNeeded: 2},
-    *   { length: 10, nbWorkersNeeded: 1},
-    * ];
-    *
-    * let model = new CP.Model;
-    * // A set of pulses, one for each task:
-    * let pulses: CP.CumulExpr[] = [];
-    * // End times of the tasks:
-    * let ends: CP.IntExpr[] = [];
-    *
-    * for (let i = 0; i < tasks.length; i++) {
-    *   // Create a task:
-    *   let task = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
-    *   // Create a pulse for the task:
-    *   pulses.push(model.pulse(task, tasks[i].nbWorkersNeeded));
-    *   // Store the end of the task:
-    *   ends.push(task.end());
-    * }
-    *
-    * // The number of workers used at any time cannot exceed nbWorkers:
-    * model.cumulLe(model.cumulSum(pulses), nbWorkers);
-    * // Minimize the maximum of the ends (makespan):
-    * model.minimize(model.max(ends));
-    *
-    * let result = await CP.solve(model, { searchType: "FDS" });
-    * ```
-    *
-    * @example
-    *
-    * In the following example, we create three interval variables `x`, `y`, and `z` that represent some tasks. Variables `x` and `y` are present, but variable `z` is optional. Each task requires a certain number of workers. The length of the task depends on the assigned number of workers. The number of assigned workers is modeled using integer variables `workersX`, `workersY`, and `workersZ`.
-    *
-    * There are 7 workers. Therefore, at any time, the sum of the workers assigned to the running tasks must be less or equal to 7.
-    *
-    * If the task `z` is absent, then the variable `workersZ` has no meaning, and therefore, it should also be absent.
-    *
-    * ```ts
-    * let model = CP.Model;
-    * let x = model.intervalVar({ name: "x" });
-    * let y = model.intervalVar({ name: "y" });
-    * let z = model.intervalVar({ name: "z", optional: true });
-    *
-    * let workersX = model.intVar({ range: [1, 5], name: "workersX" });
-    * let workersY = model.intVar({ range: [1, 5], name: "workersY" });
-    * let workersZ = model.intVar({ range: [1, 5], name: "workersZ", optional: true });
-    *
-    * // workersZ is present if an only if z is present:
-    * model.constraint(z.presence().eq(workersZ.presence()));
-    *
-    * let pulseX = model.pulse(x, workersX);
-    * let pulseY = model.pulse(y, workersY);
-    * let pulseZ = model.pulse(z, workersZ);
-    *
-    * // There are at most 7 workers at any time:
-    * model.cumulSum([pulseX, pulseY, pulseZ]).cumulLe(7);
-    *
-    * // Length of the task depends on the number of workers using the following formula:
-    * //    length * workersX = 12
-    * model.constraint(x.length().times(workersX).eq(12));
-    * model.constraint(y.length().times(workersY).eq(12));
-    * model.constraint(z.length().times(workersZ).eq(12));
-    * ```
-    *
-    * @see {@link IntervalVar.pulse | IntervalVar.pulse} is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt} for other basic cumulative functions.
-    * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
-    *  */
+     * Creates cumulative function (expression) _pulse_ for the given interval variable and height.
+     *
+     * @param interval The interval variable.
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * Pulse can be used to model a resource requirement during an interval variable. The given amount `height` of the resource is used throughout the interval (from start to end).
+     *
+     * **Limitation:** The `height` must be non-negative. Pulses with negative height are not supported. If you need negative contributions, use step functions instead (see {@link Model.stepAtStart} and {@link Model.stepAtEnd}).
+     *
+     * ### Formal definition
+     *
+     * Pulse creates a cumulative function which has the value:
+     *
+     * * `0` before `interval.start()`,
+     * * `height` between `interval.start()` and `interval.end()`,
+     * * `0` after `interval.end()`
+     *
+     * If `interval` is absent, the pulse is `0` everywhere.
+     *
+     * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+     *
+     * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the pulse is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+     *
+     * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     *
+     * @example
+     *
+     * Let us consider a set of tasks and a group of 3 workers. Each task requires a certain number of workers (`demand`). Our goal is to schedule the tasks so that the length of the schedule (makespan) is minimal.
+     *
+     * ```ts
+     * // The input data:
+     * const nbWorkers = 3;
+     * const tasks = [
+     *   { length: 10, demand: 3},
+     *   { length: 20, demand: 2},
+     *   { length: 15, demand: 1},
+     *   { length: 30, demand: 2},
+     *   { length: 20, demand: 1},
+     *   { length: 25, demand: 2},
+     *   { length: 10, demand: 1},
+     * ];
+     *
+     * let model = new CP.Model;
+     * // A set of pulses, one for each task:
+     * let pulses: CP.CumulExpr[] = [];
+     * // End times of the tasks:
+     * let ends: CP.IntExpr[] = [];
+     *
+     * for (let i = 0; i < tasks.length; i++) {
+     *   // Create a task:
+     *   let task = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
+     *   // Create a pulse for the task:
+     *   pulses.push(model.pulse(task, tasks[i].demand));
+     *   // Store the end of the task:
+     *   ends.push(task.end());
+     * }
+     *
+     * // The number of workers used at any time cannot exceed nbWorkers:
+     * model.le(model.sum(pulses), nbWorkers);
+     * // Minimize the maximum of the ends (makespan):
+     * model.minimize(model.max(ends));
+     *
+     * let result = await model.solve({ searchType: "FDS" });
+     * ```
+     *
+     * @example
+     *
+     * In the following example, we create three interval variables `x`, `y`, and `z` that represent some tasks. Variables `x` and `y` are present, but variable `z` is optional. Each task requires a certain number of workers. The length of the task depends on the assigned number of workers. The number of assigned workers is modeled using integer variables `wx`, `wy`, and `wz`.
+     *
+     * There are 7 workers. Therefore, at any time, the sum of the workers assigned to the running tasks must be less or equal to 7.
+     *
+     * If the task `z` is absent, then the variable `wz` has no meaning, and therefore, it should also be absent.
+     *
+     * ```ts
+     * let model = CP.Model;
+     * let x = model.intervalVar({ name: "x" });
+     * let y = model.intervalVar({ name: "y" });
+     * let z = model.intervalVar({ name: "z", optional: true });
+     *
+     * let wx = model.intVar({ range: [1, 5], name: "wx" });
+     * let wy = model.intVar({ range: [1, 5], name: "wy" });
+     * let wz = model.intVar({ range: [1, 5], name: "wz", optional: true });
+     *
+     * // wz is present if an only if z is present:
+     * model.enforce(z.presence().eq(wz.presence()));
+     *
+     * let px = model.pulse(x, wx);
+     * let py = model.pulse(y, wy);
+     * let pz = model.pulse(z, wz);
+     *
+     * // There are at most 7 workers at any time:
+     * model.sum([px, py, pz]).le(7);
+     *
+     * // Length of the task depends on the number of workers using the following formula:
+     * //    length * wx = 12
+     * model.enforce(x.length().times(wx).eq(12));
+     * model.enforce(y.length().times(wy).eq(12));
+     * model.enforce(z.length().times(wz).eq(12));
+     * ```
+     *
+     * @see {@link IntervalVar.pulse} is equivalent function on {@link IntervalVar}.
+     * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt} for other basic cumulative functions.
+     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     */
     pulse(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        return new CumulExpr(this, "pulse", outParams);
+        return CumulExpr._Create(this, "pulse", outParams);
     }
     /**
-    *
-    * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
-    *
-    * @remarks
-    *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
-    *
-    * A `stepAtStart` can change the amount of such resource at the start of a given variable. The amount is changed by the given `height`, which can be positive or negative.
-    *
-    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
-    *
-    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
-    *
-    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
-    *
-    * #### Formal definition
-    *
-    * stepAtStart creates a cumulative function which has the value:
-    *
-    * * `0` before `interval.start()`,
-    * * `height` after `interval.start()`.
-    *
-    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
-    *
-    * :::info
-    * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
-    * :::
-    *
-    * @example
-    *
-    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
-    *
-    * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
-    *
-    * ```ts
-    * // The input data:
-    * const initialMoney = 100;
-    * const tasks = [
-    *   { length: 10, money: -150 },
-    *   { length: 20, money:   40 },
-    *   { length: 15, money:   20 },
-    *   { length: 30, money:  -10 },
-    *   { length: 20, money:   30 },
-    *   { length: 25, money:  -20 },
-    *   { length: 10, money:   10 },
-    *   { length: 20, money:   50 },
-    * ];
-    *
-    * let model = new CP.Model;
-    * let taskVars: CP.IntervalVar[] = [];
-    * // A set of steps, one for each task:
-    * let steps: CP.CumulExpr[] = [];
-    *
-    * for (let i = 0; i < tasks.length; i++) {
-    *   let interval = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
-    *   taskVars.push(interval);
-    *   if (tasks[i].money < 0) {
-    *     // Task costs some money:
-    *     steps.push(model.stepAtStart(interval, tasks[i].money));
-    *   } else {
-    *     // Tasks makes some money:
-    *     steps.push(model.stepAtEnd(interval, tasks[i].money));
-    *   }
-    * }
-    *
-    * // The initial money increases the cumul at time 0:
-    * steps.push(model.stepAt(0, initialMoney));
-    * // The money must be non-negative at any time:
-    * model.cumulGe(model.cumulSum(steps), 0);
-    * // Only one task at a time:
-    * model.noOverlap(taskVars);
-    *
-    * // Minimize the maximum of the ends (makespan):
-    * model.max(taskVars.map(t => t.end())).minimize();
-    *
-    * let result = await CP.solve(model, { searchType: "FDS"});
-    * ```@see {@link IntervalVar.stepAtStart | IntervalVar.stepAtStart} is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.stepAtEnd}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
-    * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
-    *  */
+     * Creates cumulative function (expression) that changes value at start of the interval variable by the given height.
+     *
+     * @param interval The interval variable.
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
+     *
+     * A `stepAtStart` can change the amount of such resource at the start of a given variable. The amount is changed by the given `height`, which can be positive or negative.
+     *
+     * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+     *
+     * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+     *
+     * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     *
+     * ### Formal definition
+     *
+     * stepAtStart creates a cumulative function which has the value:
+     *
+     * * `0` before `interval.start()`,
+     * * `height` after `interval.start()`.
+     *
+     * If the `interval` or the `height` is *absent*, the created cumulative function is `0` everywhere.
+     *
+     * @example
+     *
+     * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial `budget`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+     *
+     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
+     *
+     * ```ts
+     * // The input data:
+     * const budget = 100;
+     * const tasks = [
+     *   { length: 10, money: -150 },
+     *   { length: 20, money:   40 },
+     *   { length: 15, money:   20 },
+     *   { length: 30, money:  -10 },
+     *   { length: 20, money:   30 },
+     *   { length: 25, money:  -20 },
+     *   { length: 10, money:   10 },
+     *   { length: 20, money:   50 },
+     * ];
+     *
+     * let model = new CP.Model;
+     * let taskVars: CP.IntervalVar[] = [];
+     * // A set of steps, one for each task:
+     * let steps: CP.CumulExpr[] = [];
+     *
+     * for (let i = 0; i < tasks.length; i++) {
+     *   let interval = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
+     *   taskVars.push(interval);
+     *   if (tasks[i].money < 0) {
+     *     // Task costs some money:
+     *     steps.push(model.stepAtStart(interval, tasks[i].money));
+     *   } else {
+     *     // Tasks makes some money:
+     *     steps.push(model.stepAtEnd(interval, tasks[i].money));
+     *   }
+     * }
+     *
+     * // The initial budget increases the cumul at time 0:
+     * steps.push(model.stepAt(0, budget));
+     * // The money must be non-negative at any time:
+     * model.ge(model.sum(steps), 0);
+     * // Only one task at a time:
+     * model.noOverlap(taskVars);
+     *
+     * // Minimize the maximum of the ends (makespan):
+     * model.max(taskVars.map(t => t.end())).minimize();
+     *
+     * let result = await model.solve({ searchType: "FDS"});
+     * ```
+     *
+     * @see {@link IntervalVar.stepAtStart} is equivalent function on {@link IntervalVar}.
+     * @see {@link Model.stepAtEnd}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
+     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     */
     stepAtStart(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        return new CumulExpr(this, "stepAtStart", outParams);
+        return CumulExpr._Create(this, "stepAtStart", outParams);
     }
     /**
-    *
-    * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
-    *
-    * @remarks
-    *
-    * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
-    *
-    * A `stepAtEnd` can change the amount of such resource at the end of a given variable. The amount is changed by the given `height`, which can be positive or negative.
-    *
-    * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
-    *
-    * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
-    *
-    * Cumulative steps could be combined using {@link Model.cumulPlus},{@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
-    *
-    * #### Formal definition
-    *
-    * stepAtEnd creates a cumulative function which has the value:
-    *
-    * * `0` before `interval.end()`,
-    * * `height` after `interval.end()`.
-    *
-    * If the `interval` or the `height` is _absent_, the created cumulative function is `0` everywhere.
-    *
-    * :::info
-    * Combining _pulses_ ({@link Model.pulse}) and _steps_ ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}) is not supported yet.
-    * :::
-    *
-    * @example
-    *
-    * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial amount of money `initialMoney`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
-    *
-    * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
-    *
-    * ```ts
-    * // The input data:
-    * const initialMoney = 100;
-    * const tasks = [
-    *   { length: 10, money: -150 },
-    *   { length: 20, money:   40 },
-    *   { length: 15, money:   20 },
-    *   { length: 30, money:  -10 },
-    *   { length: 20, money:   30 },
-    *   { length: 25, money:  -20 },
-    *   { length: 10, money:   10 },
-    *   { length: 20, money:   50 },
-    * ];
-    *
-    * let model = new CP.Model;
-    * let taskVars: CP.IntervalVar[] = [];
-    * // A set of steps, one for each task:
-    * let steps: CP.CumulExpr[] = [];
-    *
-    * for (let i = 0; i < tasks.length; i++) {
-    *   let interval = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
-    *   taskVars.push(interval);
-    *   if (tasks[i].money < 0) {
-    *     // Task costs some money:
-    *     steps.push(model.stepAtStart(interval, tasks[i].money));
-    *   } else {
-    *     // Tasks makes some money:
-    *     steps.push(model.stepAtEnd(interval, tasks[i].money));
-    *   }
-    * }
-    *
-    * // The initial money increases the cumul at time 0:
-    * steps.push(model.stepAt(0, initialMoney));
-    * // The money must be non-negative at any time:
-    * model.cumulGe(model.cumulSum(steps), 0);
-    * // Only one task at a time:
-    * model.noOverlap(taskVars);
-    *
-    * // Minimize the maximum of the ends (makespan):
-    * model.max(taskVars.map(t => t.end())).minimize();
-    *
-    * let result = await CP.solve(model, { searchType: "FDS"});
-    * ```@see {@link IntervalVar.stepAtEnd | IntervalVar.stepAtEnd} is equivalent function on {@link IntervalVar}.
-    * @see {@link Model.stepAtStart}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
-    * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
-    *  */
+     * Creates cumulative function (expression) that changes value at end of the interval variable by the given height.
+     *
+     * @param interval The interval variable.
+     * @param height The height value.
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * Cumulative _step_ functions could be used to model a resource that is consumed or produced and, therefore, changes in amount over time. Examples of such a resource are a battery, an account balance, a product's stock, etc.
+     *
+     * A `stepAtEnd` can change the amount of such resource at the end of a given variable. The amount is changed by the given `height`, which can be positive or negative.
+     *
+     * The `height` can be a constant value or an expression. In particular, the `height` can be given by an {@link IntVar}. In such a case, the `height` is unknown at the time of the model creation but is determined during the search.
+     *
+     * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
+     *
+     * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     *
+     * ### Formal definition
+     *
+     * stepAtEnd creates a cumulative function which has the value:
+     *
+     * * `0` before `interval.end()`,
+     * * `height` after `interval.end()`.
+     *
+     * If the `interval` or the `height` is *absent*, the created cumulative function is `0` everywhere.
+     *
+     * @example
+     *
+     * Let us consider a set of tasks. Each task either costs a certain amount of money or makes some money. Money is consumed at the start of a task and produced at the end. We have an initial `budget`, and we want to schedule the tasks so that we do not run out of money (i.e., the amount is always non-negative).
+     *
+     * Tasks cannot overlap. Our goal is to find the shortest schedule possible.
+     *
+     * ```ts
+     * // The input data:
+     * const budget = 100;
+     * const tasks = [
+     *   { length: 10, money: -150 },
+     *   { length: 20, money:   40 },
+     *   { length: 15, money:   20 },
+     *   { length: 30, money:  -10 },
+     *   { length: 20, money:   30 },
+     *   { length: 25, money:  -20 },
+     *   { length: 10, money:   10 },
+     *   { length: 20, money:   50 },
+     * ];
+     *
+     * let model = new CP.Model;
+     * let taskVars: CP.IntervalVar[] = [];
+     * // A set of steps, one for each task:
+     * let steps: CP.CumulExpr[] = [];
+     *
+     * for (let i = 0; i < tasks.length; i++) {
+     *   let interval = model.intervalVar({ name: "T" + (i+1), length: tasks[i].length} );
+     *   taskVars.push(interval);
+     *   if (tasks[i].money < 0) {
+     *     // Task costs some money:
+     *     steps.push(model.stepAtStart(interval, tasks[i].money));
+     *   } else {
+     *     // Tasks makes some money:
+     *     steps.push(model.stepAtEnd(interval, tasks[i].money));
+     *   }
+     * }
+     *
+     * // The initial budget increases the cumul at time 0:
+     * steps.push(model.stepAt(0, budget));
+     * // The money must be non-negative at any time:
+     * model.ge(model.sum(steps), 0);
+     * // Only one task at a time:
+     * model.noOverlap(taskVars);
+     *
+     * // Minimize the maximum of the ends (makespan):
+     * model.max(taskVars.map(t => t.end())).minimize();
+     *
+     * let result = await model.solve({ searchType: "FDS"});
+     * ```
+     *
+     * @see {@link IntervalVar.stepAtEnd} is equivalent function on {@link IntervalVar}.
+     * @see {@link Model.stepAtStart}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
+     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     */
     stepAtEnd(interval, height) {
         let outParams = [GetIntervalVar(interval), GetIntExpr(height)];
-        return new CumulExpr(this, "stepAtEnd", outParams);
+        return CumulExpr._Create(this, "stepAtEnd", outParams);
     }
     /**
-    * Creates cumulative function (expression) that changes value at `x` by the given `height`. The height can be positive or negative, and it can be given by a constant or an expression (for example, by {@link Model.intVar}).
-    *
-    * @remarks
-    *
-    * Function stepAt is functionally the same as {@link Model.stepAtStart} and {@link Model.stepAtEnd}. However, the time of the change is given by the constant value `x` instead of by the start/end of an interval variable.
-    *
-    * #### Formal definition
-    *
-    * `stepAt` creates a cumulative function which has the value:
-    *
-    * * 0 before `x`,
-    * * `height` after `x`.
-    *
-    * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd} for an example with `stepAt`.
-    * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
-    *  */
+     * Creates a cumulative function that changes value at a given point.
+     *
+     * @param x The point at which the cumulative function changes value.
+     * @param height The height value (can be positive, negative, constant, or expression).
+     *
+     * @returns The resulting cumulative expression
+     *
+     * @remarks
+     * This function is similar to {@link Model.stepAtStart} and {@link Model.stepAtEnd}, but the time of the change is given by the constant value `x` instead of by the start/end of an interval variable. The height can be a constant or an expression (e.g., created by {@link Model.intVar}).
+     *
+     * ### Formal definition
+     *
+     * `stepAt` creates a cumulative function which has the value:
+     *
+     * * 0 before `x`,
+     * * `height` after `x`.
+     *
+     * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd} for an example with `stepAt`.
+     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     */
     stepAt(x, height) {
         let outParams = [GetInt(x), GetIntExpr(height)];
-        return new CumulExpr(this, "stepAt", outParams);
-    }
-    /**
-    * Addition of two cumulative expressions.
-    *
-    * @remarks
-    *
-    * Computes addition of two cumulative functions.
-    *
-    * #### Formal definition
-    *
-    * Let `result = cumulPlus(lhs, rhs)`. Then for any number `x` in range {@link IntervalMin}..{@link IntervalMax} the value of `result` at `x` is equal to `lhs` at `x` plus `rhs` at `x`.
-    *
-    * `cumulPlus(lhs, rhs)` is the same as `cumulSum([lhs, rhs])`.
-    *
-    * @see {@link CumulExpr.cumulPlus | CumulExpr.cumulPlus} for the equivalent function on {@link CumulExpr}.
-    * @see {@link cumulSum}, {@link cumulMinus}, {@link cumulNeg} for other ways to combine cumulative functions.
-    *  */
-    cumulPlus(lhs, rhs) {
-        let outParams = [GetCumulExpr(lhs), GetCumulExpr(rhs)];
-        return new CumulExpr(this, "cumulPlus", outParams);
-    }
-    /**
-    * Subtraction of two cumulative expressions.
-    *
-    * @remarks
-    *
-    * Computes subtraction of two cumulative functions.
-    *
-    * #### Formal definition
-    *
-    * Let `result = cumulMinus(lhs, rhs)`. Then for any number `x` in range {@link IntervalMin}..{@link IntervalMax} the value of `result` at `x` is equal to `lhs` at `x` minus `rhs` at `x`.
-    *
-    * `cumulMinus(lhs, rhs)` is the same as `cumulSum([lhs, cumulNeg(rhs)])`.
-    *
-    * @see {@link CumulExpr.cumulMinus | CumulExpr.cumulMinus} for the equivalent function on {@link CumulExpr}.
-    * @see {@link cumulSum}, {@link cumulPlus}, {@link cumulNeg} for other ways to combine cumulative functions.
-    *  */
-    cumulMinus(lhs, rhs) {
-        let outParams = [GetCumulExpr(lhs), GetCumulExpr(rhs)];
-        return new CumulExpr(this, "cumulMinus", outParams);
-    }
-    /**
-    * Negation of a cumulative expression.
-    *
-    * @remarks
-    *
-    * Computes negation of a cumulative function. That is, the resulting function has the opposite values.
-    *
-    * @see {@link CumulExpr.cumulNeg | CumulExpr.cumulNeg} for the equivalent function on {@link CumulExpr}.
-    * @see {@link cumulSum}, {@link cumulPlus}, {@link cumulMinus} for other ways to combine cumulative functions.
-    *  */
-    cumulNeg(arg) {
-        let outParams = [GetCumulExpr(arg)];
-        return new CumulExpr(this, "cumulNeg", outParams);
-    }
-    /**
-    * Sum of cumulative expressions.
-    *
-    * @remarks
-    *
-    * Computes the sum of cumulative functions. The sum can be used, e.g., to combine contributions of individual tasks to total resource consumption.
-    *
-    * @see {@link cumulPlus}, {@link cumulMinus}, {@link cumulNeg} for other ways to combine cumulative functions.
-    *  */
-    cumulSum(array) {
-        let outParams = [this._getCumulExprArray(array)];
-        return new CumulExpr(this, "cumulSum", outParams);
-    }
-    /**
-    * Constrains cumulative function `cumul` to be everywhere less or equal to `maxCapacity`.
-    *
-    * @remarks
-    *
-    * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
-    * See {@link Model.pulse} for an example with `cumulLe`.
-    *
-    * @see {@link CumulExpr.cumulLe | CumulExpr.cumulLe} for the equivalent function on {@link CumulExpr}.
-    * @see {@link Model.cumulGe} for the opposite constraint.
-    *  */
-    cumulLe(cumul, maxCapacity) {
-        let outParams = [GetCumulExpr(cumul), GetInt(maxCapacity)];
-        new Constraint(this, "cumulLe", outParams);
-    }
-    /**
-    * Constrains cumulative function `cumul` to be everywhere greater or equal to `minCapacity`.
-    *
-    * @remarks
-    *
-    * This function can be used to specify the minimum limit of resource usage at any time. For example to make sure that there is never less than zero material on stock.
-    * See {@link Model.stepAtStart} for an example with `cumulGe`.
-    *
-    * @see {@link CumulExpr.cumulGe | CumulExpr.cumulGe} for the equivalent function on {@link CumulExpr}.
-    * @see {@link Model.cumulLe} for the opposite constraint.
-    *  */
-    cumulGe(cumul, minCapacity) {
-        let outParams = [GetCumulExpr(cumul), GetInt(minCapacity)];
-        new Constraint(this, "cumulGe", outParams);
+        return CumulExpr._Create(this, "stepAt", outParams);
     }
     /** @internal */
     _cumulMaxProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
-        new Constraint(this, "cumulMaxProfile", outParams);
+        return Constraint._Create(this, "cumulMaxProfile", outParams);
     }
     /** @internal */
     _cumulMinProfile(cumul, profile) {
         let outParams = [GetCumulExpr(cumul), GetIntStepFunction(profile)];
-        new Constraint(this, "cumulMinProfile", outParams);
+        return Constraint._Create(this, "cumulMinProfile", outParams);
     }
     /** @internal */
     _cumulStairs(atoms) {
         let outParams = [this._getCumulExprArray(atoms)];
-        return new CumulExpr(this, "cumulStairs", outParams);
+        return CumulExpr._Create(this, "cumulStairs", outParams);
     }
     /** @internal */
     _precedenceEnergyBefore(main, others, heights, capacity) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(others), this._getIntArray(heights), GetInt(capacity)];
-        new Constraint(this, "precedenceEnergyBefore", outParams);
+        return Constraint._Create(this, "precedenceEnergyBefore", outParams);
     }
     /** @internal */
     _precedenceEnergyAfter(main, others, heights, capacity) {
         let outParams = [GetIntervalVar(main), this._getIntervalVarArray(others), this._getIntArray(heights), GetInt(capacity)];
-        new Constraint(this, "precedenceEnergyAfter", outParams);
+        return Constraint._Create(this, "precedenceEnergyAfter", outParams);
     }
     /**
-    * Computes sum of values of the step function `func` over the interval `interval`.
-    *
-    * @remarks
-    *
-    * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. The sum includes the function value at the start time but not the value at the end time. If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is `absent`.
-    *
-    * **Requirement**: The step function `func` must be non-negative.
-    *
-    * @see {@link IntStepFunction.stepFunctionSum} for the equivalent function on {@link IntStepFunction}.
-    *  */
-    stepFunctionSum(func, interval) {
+     * Computes sum of values of the step function `func` over the interval `interval`.
+     *
+     * @param func The step function.
+     * @param interval The interval variable.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The sum is computed over all points in range `interval.start()` .. `interval.end()-1`. The sum includes the function value at the start time but not the value at the end time. If the interval variable has zero length, then the result is 0. If the interval variable is absent, then the result is `absent`.
+     *
+     * **Requirement**: The step function `func` must be non-negative.
+     *
+     * @see {@link IntStepFunction.integral} for the equivalent function on {@link IntStepFunction}.
+     */
+    integral(func, interval) {
         let outParams = [GetIntStepFunction(func), GetIntervalVar(interval)];
-        return new IntExpr(this, "intStepFunctionSum", outParams);
+        return IntExpr._Create(this, "intStepFunctionIntegral", outParams);
     }
     /** @internal */
-    _stepFunctionSumInRange(func, interval, lb, ub) {
+    _stepFunctionIntegralInRange(func, interval, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntervalVar(interval), GetInt(lb), GetInt(ub)];
-        new Constraint(this, "intStepFunctionSumInRange", outParams);
+        return Constraint._Create(this, "intStepFunctionIntegralInRange", outParams);
     }
     /**
-    * Evaluates a step function at a given point.
-    *
-    * @remarks
-    *
-    * The result is the value of the step function `func` at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
-    *
-    * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
-    *
-    * @see {@link IntStepFunction.stepFunctionEval} for the equivalent function on {@link IntStepFunction}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} are convenience functions built on top of `stepFunctionEval`.
-    *  */
-    stepFunctionEval(func, arg) {
+     * Evaluates a step function at a given point.
+     *
+     * @param func The step function.
+     * @param arg The point at which to evaluate the step function.
+     *
+     * @returns The resulting integer expression
+     *
+     * @remarks
+     * The result is the value of the step function `func` at the point `arg`. If the value of `arg` is `absent`, then the result is also `absent`.
+     *
+     * By constraining the returned value, it is possible to limit `arg` to be only within certain segments of the segmented function. In particular, functions {@link Model.forbidStart} and {@link Model.forbidEnd} work that way.
+     *
+     * @see {@link IntStepFunction.eval} for the equivalent function on {@link IntStepFunction}.
+     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} are convenience functions built on top of `eval`.
+     */
+    eval(func, arg) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg)];
-        return new IntExpr(this, "intStepFunctionEval", outParams);
+        return IntExpr._Create(this, "intStepFunctionEval", outParams);
     }
     /** @internal */
     _stepFunctionEvalInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        new Constraint(this, "intStepFunctionEvalInRange", outParams);
+        return Constraint._Create(this, "intStepFunctionEvalInRange", outParams);
     }
     /** @internal */
     _stepFunctionEvalNotInRange(func, arg, lb, ub) {
         let outParams = [GetIntStepFunction(func), GetIntExpr(arg), GetInt(lb), GetInt(ub)];
-        new Constraint(this, "intStepFunctionEvalNotInRange", outParams);
+        return Constraint._Create(this, "intStepFunctionEvalNotInRange", outParams);
     }
     /**
-    * Forbid the interval variable to overlap with segments of the function where the value is zero.
-    *
-    * @remarks
-    *
-    * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
-    *
-    * @see {@link IntervalVar.forbidExtent} for the equivalent function on {@link IntervalVar}.
-    * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * Forbid the interval variable to overlap with segments of the function where the value is zero.
+     *
+     * @param interval The interval variable.
+     * @param func The step function.
+     *
+     * @returns The constraint forbidding the extent (entire interval).
+     *
+     * @remarks
+     * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
+     *
+     * ## Example
+     *
+     * A production task that cannot overlap with scheduled maintenance windows:
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 3-hour production run
+     * const production = model.intervalVar({ length: 3, name: "production" });
+     *
+     * // Machine availability: 1 = available, 0 = under maintenance
+     * const availability = model.stepFunction([
+     *     [0, 1],   // Initially available
+     *     [8, 0],   // 8h: maintenance starts
+     *     [10, 1],  // 10h: maintenance ends
+     * ]);
+     *
+     * // Production cannot overlap periods where availability is 0
+     * model.forbidExtent(production, availability);
+     * model.minimize(production.end());
+     *
+     * const result = await model.solve();
+     * // Production runs [0, 3) - finishes before maintenance window
+     * ```
+     *
+     * @see {@link IntervalVar.forbidExtent} for the equivalent function on {@link IntervalVar}.
+     * @see {@link Model.forbidStart}, {@link Model.forbidEnd} for similar functions that constrain the start/end of an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidExtent(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        new Constraint(this, "forbidExtent", outParams);
+        return Constraint._Create(this, "forbidExtent", outParams);
     }
     /**
-    * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
-    *
-    * @remarks
-    *
-    * This function is equivalent to:
-    *
-    * ```
-    *   model.constraint(model.ne(model.stepFunctionEval(func, interval.start()), 0));
-    * ```
-    *
-    * I.e., the function value at the start of the interval variable cannot be zero.
-    *
-    * @see {@link IntervalVar.forbidStart} for the equivalent function on {@link IntervalVar}.
-    * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * Constrains the start of the interval variable to be outside of the zero-height segments of the step function.
+     *
+     * @param interval The interval variable.
+     * @param func The step function.
+     *
+     * @returns The constraint forbidding the start point.
+     *
+     * @remarks
+     * This function is equivalent to:
+     *
+     * ```ts
+     *   model.enforce(model.ne(model.eval(func, interval.start()), 0));
+     * ```
+     *
+     * I.e., the function value at the start of the interval variable cannot be zero.
+     *
+     * ## Example
+     *
+     * A factory task that can only start during work hours (excluding breaks):
+     *
+     * @see {@link IntervalVar.forbidStart} for the equivalent function on {@link IntervalVar}.
+     * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidStart(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        new Constraint(this, "forbidStart", outParams);
+        return Constraint._Create(this, "forbidStart", outParams);
     }
     /**
-    * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
-    *
-    * @remarks
-    *
-    * This function is equivalent to:
-    *
-    * ```
-    *   model.constraint(model.ne(model.stepFunctionEval(func, interval.end()), 0));
-    * ```
-    *
-    * I.e., the function value at the end of the interval variable cannot be zero.
-    *
-    * @see {@link IntervalVar.forbidEnd} for the equivalent function on {@link IntervalVar}.
-    * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
-    * @see {@link Model.stepFunctionEval} for evaluation of a step function.
-    *  */
+     * Constrains the end of the interval variable to be outside of the zero-height segments of the step function.
+     *
+     * @param interval The interval variable.
+     * @param func The step function.
+     *
+     * @returns The constraint forbidding the end point.
+     *
+     * @remarks
+     * This function is equivalent to:
+     *
+     * ```ts
+     *   model.enforce(model.ne(model.eval(func, interval.end()), 0));
+     * ```
+     *
+     * I.e., the function value at the end of the interval variable cannot be zero.
+     *
+     * ## Example
+     *
+     * A delivery task that must complete during business hours (not during lunch break):
+     *
+     * @see {@link IntervalVar.forbidEnd} for the equivalent function on {@link IntervalVar}.
+     * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
+     * @see {@link Model.eval} for evaluation of a step function.
+     */
     forbidEnd(interval, func) {
         let outParams = [GetIntervalVar(interval), GetIntStepFunction(func)];
-        new Constraint(this, "forbidEnd", outParams);
+        return Constraint._Create(this, "forbidEnd", outParams);
     }
     /** @internal */
     _disjunctiveIsBefore(x, y) {
         let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
-        return new BoolExpr(this, "disjunctiveIsBefore", outParams);
+        return BoolExpr._Create(this, "disjunctiveIsBefore", outParams);
     }
     /** @internal */
     _itvPresenceChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        new Constraint(this, "itvPresenceChain", outParams);
+        return Constraint._Create(this, "itvPresenceChain", outParams);
     }
     /** @internal */
     _itvPresenceChainWithCount(intervals, count) {
         let outParams = [this._getIntervalVarArray(intervals), GetIntExpr(count)];
-        new Constraint(this, "itvPresenceChainWithCount", outParams);
+        return Constraint._Create(this, "itvPresenceChainWithCount", outParams);
     }
     /** @internal */
     _endBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        new Constraint(this, "endBeforeStartChain", outParams);
+        return Constraint._Create(this, "endBeforeStartChain", outParams);
     }
     /** @internal */
     _startBeforeStartChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        new Constraint(this, "startBeforeStartChain", outParams);
+        return Constraint._Create(this, "startBeforeStartChain", outParams);
     }
     /** @internal */
     _endBeforeEndChain(intervals) {
         let outParams = [this._getIntervalVarArray(intervals)];
-        new Constraint(this, "endBeforeEndChain", outParams);
+        return Constraint._Create(this, "endBeforeEndChain", outParams);
     }
     /** @internal */
     _decisionPresentIntVar(variable, isLeft) {
         let outParams = [GetIntExpr(variable), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentIntVar", outParams);
+        return SearchDecision._Create(this, "decisionPresentIntVar", outParams);
     }
     /** @internal */
     _decisionAbsentIntVar(variable, isLeft) {
         let outParams = [GetIntExpr(variable), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionAbsentIntVar", outParams);
+        return SearchDecision._Create(this, "decisionAbsentIntVar", outParams);
     }
     /** @internal */
     _decisionPresentIntervalVar(variable, isLeft) {
         let outParams = [GetIntervalVar(variable), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentIntervalVar", outParams);
+        return SearchDecision._Create(this, "decisionPresentIntervalVar", outParams);
     }
     /** @internal */
     _decisionAbsentIntervalVar(variable, isLeft) {
         let outParams = [GetIntervalVar(variable), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionAbsentIntervalVar", outParams);
+        return SearchDecision._Create(this, "decisionAbsentIntervalVar", outParams);
     }
     /** @internal */
     _decisionPresentLE(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentLE", outParams);
+        return SearchDecision._Create(this, "decisionPresentLE", outParams);
     }
     /** @internal */
     _decisionOptionalGT(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalGT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalGT", outParams);
     }
     /** @internal */
     _decisionPresentGE(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentGE", outParams);
+        return SearchDecision._Create(this, "decisionPresentGE", outParams);
     }
     /** @internal */
     _decisionOptionalLT(variable, bound, isLeft) {
         let outParams = [GetIntExpr(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalLT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalLT", outParams);
     }
     /** @internal */
     _decisionPresentStartLE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentStartLE", outParams);
+        return SearchDecision._Create(this, "decisionPresentStartLE", outParams);
     }
     /** @internal */
     _decisionOptionalStartGT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalStartGT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalStartGT", outParams);
     }
     /** @internal */
     _decisionPresentStartGE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentStartGE", outParams);
+        return SearchDecision._Create(this, "decisionPresentStartGE", outParams);
     }
     /** @internal */
     _decisionOptionalStartLT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalStartLT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalStartLT", outParams);
     }
     /** @internal */
     _decisionPresentEndLE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentEndLE", outParams);
+        return SearchDecision._Create(this, "decisionPresentEndLE", outParams);
     }
     /** @internal */
     _decisionOptionalEndGT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalEndGT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalEndGT", outParams);
     }
     /** @internal */
     _decisionPresentEndGE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentEndGE", outParams);
+        return SearchDecision._Create(this, "decisionPresentEndGE", outParams);
     }
     /** @internal */
     _decisionOptionalEndLT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalEndLT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalEndLT", outParams);
     }
     /** @internal */
     _decisionPresentLengthLE(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionPresentLengthLE", outParams);
+        return SearchDecision._Create(this, "decisionPresentLengthLE", outParams);
     }
     /** @internal */
     _decisionOptionalLengthGT(variable, bound, isLeft) {
         let outParams = [GetIntervalVar(variable), GetInt(bound), GetBool(isLeft)];
-        return new SearchDecision(this, "decisionOptionalLengthGT", outParams);
+        return SearchDecision._Create(this, "decisionOptionalLengthGT", outParams);
     }
     /** @internal */
     _noGood(decisions) {
         let outParams = [this._getSearchDecisionArray(decisions)];
-        new Constraint(this, "noGood", outParams);
+        return Constraint._Create(this, "noGood", outParams);
     }
     /** @internal */
     _related(x, y) {
         let outParams = [GetIntervalVar(x), GetIntervalVar(y)];
-        return new Directive(this, "related", outParams);
+        return Directive._Create(this, "related", outParams);
     }
     /** @internal */
-    pack(load, where, sizes) {
+    _pack(load, where, sizes) {
         let outParams = [this._getIntExprArray(load), this._getIntExprArray(where), this._getIntArray(sizes)];
-        new Constraint(this, "pack", outParams);
-    }
-    noOverlap(seq, transitions) {
-        if (Array.isArray(seq))
-            seq = this.auxiliarySequenceVar(seq);
-        this._noOverlap(seq, transitions);
+        return Constraint._Create(this, "pack", outParams);
     }
     /**
-     * Assign a name to the model. It overwrites any name that was previously
-     * set, e.g. in the {@link Model} constructor.
+     * Constrain a set of interval variables not to overlap.
      *
-     * Naming the model is optional.  The primary purpose of the name is to
-     * distinguish between different models during benchmarking (see {@link benchmark}).
+     * @param intervals An array of interval variables or a sequence variable to constrain
+     * @param transitions (Optional) A 2D square array of minimum transition times between the intervals
+     *
+     * @returns The no-overlap constraint.
+     *
+     * @remarks
+     * This function constrains a set of interval variables so they do not overlap.
+     * That is, for each pair of interval variables `x` and `y`, one of the
+     * following must hold:
+     *
+     * 1. Interval variable `x` or `y` is *absent*. In this case, the absent interval
+     * is not scheduled (the task is not performed), so it cannot overlap
+     * with any other interval. Only *optional* interval variables can be *absent*.
+     * 2. Interval variable `x` is before `y`, that is, `x.end()` is less than or
+     * equal to `y.start()`.
+     * 3. The interval variable `y` is before `x`. That is, `y.end()` is less than or
+     * equal to `x.start()`.
+     *
+     * The function can also take a square array `transitions` of minimum
+     * transition times between the intervals. The transition time is the time
+     * that must elapse between the end of the first interval and the start of the
+     * second interval. The transition time cannot be negative. When transition
+     * times are specified, the above conditions 2 and 3 are modified as follows:
+     *
+     * 2. `x.end() + transitions[i][j]` is less than or equal to `y.start()`.
+     * 3. `y.end() + transitions[j][i]` is less than or equal to `x.start()`.
+     *
+     * Where `i` and `j` are types of `x` and `y`. When an array of intervals is passed,
+     * the type of each interval is its index in the array.
+     *
+     * Note that minimum transition times are enforced between all pairs of
+     * intervals, not only between direct neighbors.
+     *
+     * Instead of an array of interval variables, a {@link SequenceVar} can be passed.
+     * See {@link Model.sequenceVar} for how to assign types to intervals in a sequence.
+     *
+     * @example
+     *
+     * The following example does not use transition times. For example with
+     * transition times see {@link SequenceVar.noOverlap}.
+     *
+     * Let's consider a set of tasks that must be performed by a single machine.
+     * The machine can handle only one task at a time. Each task is
+     * characterized by its length and a deadline. The goal is to schedule the
+     * tasks on the machine so that the number of missed deadlines is minimized.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const tasks = [
+     *   { length: 10, deadline: 70 },
+     *   { length: 20, deadline: 50 },
+     *   { length: 15, deadline: 50 },
+     *   { length: 30, deadline: 100 },
+     *   { length: 20, deadline: 120 },
+     *   { length: 25, deadline: 90 },
+     *   { length: 30, deadline: 80 },
+     *   { length: 10, deadline: 40 },
+     *   { length: 20, deadline: 60 },
+     *   { length: 25, deadline: 150 },
+     * ];
+     *
+     * const model = new CP.Model();
+     *
+     * // An interval variable for each task:
+     * const taskVars = [];
+     * // A boolean expression that is true if the task is late:
+     * const isLate = [];
+     *
+     * for (let i = 0; i < tasks.length; i++) {
+     *   const task = tasks[i];
+     *   const taskVar = model.intervalVar({ name: `Task${i}`, length: task.length });
+     *   taskVars.push(taskVar);
+     *   isLate.push(taskVar.end().ge(task.deadline));
+     * }
+     *
+     * // Tasks cannot overlap:
+     * model.noOverlap(taskVars);
+     * // Minimize the number of late tasks:
+     * model.minimize(model.sum(isLate));
+     *
+     * const result = await model.solve();
+     * ```
+     *
+     * @see {@link SequenceVar.noOverlap} is the equivalent method on {@link SequenceVar}.
      */
-    setName(name) {
-        this.#name = name;
+    noOverlap(intervals, transitions) {
+        if (Array.isArray(intervals))
+            intervals = this.auxiliarySequenceVar(intervals);
+        this._noOverlap(intervals, transitions);
     }
     /**
-     * Returns the name of the model. When no name was set, it returns `undefined`.
+     * The name of the model.
+     *
+     * @remarks
+     * The name is optional and primarily useful for distinguishing between different
+     * models during debugging and benchmarking. When set, it helps identify the model
+     * in logs and benchmark results.
+     *
+     * The name can be set either in the constructor or by assigning to this property.
+     * Assigning overwrites any name that was previously set.
+     *
+     * ```ts
+     * import OptalCP from "optalcp";
+     *
+     * const cp = await OptalCP();
+     *
+     * // Set name in constructor
+     * let model = cp.Model({ name: "MySchedulingProblem" });
+     * console.log(model.getName());  // "MySchedulingProblem"
+     *
+     * // Or set name later
+     * model = cp.Model();
+     * model.setName("JobShop");
+     * console.log(model.getName());  // "JobShop"
+     * ```
      */
+    get name() { return this.#name; }
+    set name(value) { this.#name = value; }
+    /** @deprecated Use `name` property instead */
+    setName(name) { this.#name = name; }
+    /** @deprecated Use `name` property instead */
     getName() { return this.#name; }
+    /**
+     * Enforces a boolean expression as a constraint in the model.
+     *
+     * @param constraint The constraint, boolean expression, or iterable of these to enforce in the model
+     *
+     * @remarks
+     * This is the primary method for enforcing boolean expressions as constraints in the model.
+     *
+     * A constraint is satisfied if it is not `false`. In other words, a constraint is
+     * satisfied if it is `true` or *absent*.
+     *
+     * A boolean expression that is *not* enforced as a constraint can have
+     * arbitrary value in a solution (`true`, `false`, or *absent*). Once enforced
+     * as a constraint, it can only be `true` or *absent* in the solution.
+     *
+     * **Note:** Constraint objects are automatically registered when created.
+     * Passing them to `enforce()` is accepted but does nothing. For cumulative
+     * constraints (`cumul <= capacity`, `cumul >= min_level`), using `enforce()` is
+     * recommended for code clarity even though it's not required.
+     *
+     * ### Accepted argument types
+     *
+     * The `enforce` method accepts several types of arguments:
+     *
+     * 1. **BoolExpr objects**: Boolean expressions created from comparisons
+     *    (e.g., `x <= 5`, `a == b`) or logical operations (e.g., `a & b`, `~c`).
+     * 2. **bool values**: Python boolean constants `True` or `False`.
+     * 3. **Constraint objects**: Accepted but does nothing (constraints auto-register).
+     *    Use with cumulative constraints for clarity: `model.enforce(cumul <= capacity)`.
+     * 4. **Iterables**: Lists, tuples, or generators of the above types.
+     *
+     * @example
+     *
+     * Basic usage with a boolean expression:
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "x" });
+     *
+     * // Enforce boolean expressions as constraints
+     * model.enforce(x.start().ge(0));
+     * model.enforce(x.end().le(100));
+     * ```
+     *
+     * @example
+     *
+     * Enforcing multiple constraints at once using an iterable:
+     *
+     * ```ts
+     * const model = new CP.Model();
+     * const tasks = Array.from({ length: 5 }, (_, i) =>
+     *   model.intervalVar({ length: 10, name: `task_${i}` })
+     * );
+     *
+     * // Enforce multiple constraints at once
+     * const constraints = tasks.map(task => task.start().ge(0));
+     * model.enforce(constraints);
+     *
+     * // Or inline
+     * model.enforce(tasks.map(task => task.end().le(100)));
+     * ```
+     *
+     * @example
+     *
+     * Enforcing multiple boolean expressions:
+     *
+     * ```ts
+     * const model = new CP.Model();
+     * const x = model.intVar(0, 100, "x");
+     * const y = model.intVar(0, 100, "y");
+     *
+     * // Enforce various boolean expressions
+     * model.enforce([
+     *     x.plus(y).le(50),      // From comparison
+     *     x.ge(10),              // From comparison
+     *     true,                  // Trivially satisfied constraint
+     * ]);
+     * ```
+     *
+     * @see {@link BoolExpr.enforce} for the fluent-style alternative.
+     * @see {@link Model.noOverlap} for creating no-overlap constraints.
+     * @see {@link Model.minimize} for creating minimization objectives.
+     * @see {@link Model.maximize} for creating maximization objectives.
+     */
+    enforce(constraint) {
+        // Quietly ignore Constraint, those are already registered
+        if (IsIterable(constraint))
+            for (let c of constraint) {
+                if (!(c instanceof Constraint))
+                    this.#model.push(GetConstraint(c));
+            }
+        else if (!(constraint instanceof Constraint))
+            this.#model.push(GetConstraint(constraint));
+    }
+    /** @deprecated Use `enforce` instead */
     constraint(constraint) {
-        this.#model.push(GetConstraint(constraint));
+        this.enforce(constraint);
     }
     /** @internal */
     _addDirective(directive) {
         this.#model.push(directive._getArg());
     }
     /** @internal */
+    _addConstraint(constraint) {
+        this.#model.push(constraint._getArg());
+    }
+    /** @internal */
     boolConst(value) {
-        return new BoolExpr(this, "boolConst", [GetBool(value)]);
+        return BoolExpr._Create(this, "boolConst", [GetBool(value)]);
     }
     /** @internal */
     trueConst() {
-        return new BoolExpr(this, "boolConst", [true]);
+        return BoolExpr._Create(this, "boolConst", [true]);
     }
     /** @internal */
     falseConst() {
-        return new BoolExpr(this, "boolConst", [false]);
+        return BoolExpr._Create(this, "boolConst", [false]);
     }
     /** @internal */
     absentConst() {
-        return new BoolExpr(this, "boolConst", []);
+        return BoolExpr._Create(this, "boolConst", []);
     }
     /** @internal */
     intConst(value) {
-        return new IntExpr(this, "intConst", [GetInt(value)]);
+        return IntExpr._Create(this, "intConst", [GetInt(value)]);
     }
     /** @internal */
     floatConst(value) {
-        return new FloatExpr(this, "floatConst", [GetFloat(value)]);
+        return FloatExpr._Create(this, "floatConst", [GetFloat(value)]);
     }
-    /** @internal */
+    /**
+     * Creates a new boolean variable and adds it to the model.
+     *
+     * @param params.optional (Optional) If true, the variable can be absent in a solution (default false)
+     * @param params.name (Optional) Name for the variable (useful for debugging)
+     *
+     * @returns The created boolean variable.
+     *
+     * @remarks
+     * A boolean variable represents an unknown truth value (`true` or `false`) that the
+     * solver must find. Boolean variables are useful for modeling decisions, choices,
+     * or logical conditions in your problem.
+     *
+     * By default, a boolean variable must be assigned a value (`true` or `false`) in every
+     * solution. When `optional: true`, the variable can also be *absent*, meaning the
+     * solution does not use the variable at all. This is useful when the variable
+     * represents a decision that may not apply in all scenarios.
+     *
+     * Boolean variables support logical operations via methods:
+     *
+     * - {@link BoolExpr.not} for logical NOT
+     * - {@link BoolExpr.or} for logical OR
+     * - {@link BoolExpr.and} for logical AND
+     *
+     * @see {@link Model.intervalVar} for the primary variable type for scheduling problems.
+     * @see {@link Model.intVar} for numeric decisions.
+     *
+     * @example
+     *
+     * Create boolean variables to model decisions:
+     *
+     * ```ts
+     * let model = new CP.Model();
+     * let useMachineA = model.boolVar({ name: "useMachineA" });
+     * let useMachineB = model.boolVar({ name: "useMachineB" });
+     *
+     * // Constraint: must use at least one machine
+     * model.enforce(useMachineA.or(useMachineB));
+     *
+     * // Constraint: cannot use both machines
+     * model.enforce(useMachineA.and(useMachineB).not());
+     * ```
+     */
     boolVar(params = {}) {
-        const x = new BoolVar(this);
+        const x = BoolVar._Create(this);
         if (params.name)
-            x.setName(params.name);
+            x.name = params.name;
         if (params.optional)
-            x.makeOptional();
-        if (typeof params.range === "boolean")
-            x.setRange(+params.range, +params.range);
-        else if (Array.isArray(params.range)) {
-            if (params.range[0] !== undefined)
-                x.setMin(params.range[0]);
-            if (params.range[1] !== undefined)
-                x.setMax(params.range[1]);
-        }
-        this.#model.push(x._getArg());
+            x.optional = true;
         this.#boolVars.push(x);
         return x;
     }
     auxiliaryBoolVar(arg) {
-        let x = this.boolVar(arg);
+        const params = typeof arg === 'string' ? { name: arg } : arg;
+        let x = this.boolVar(params);
         x._makeAuxiliary();
         return x;
     }
-    /**
-     * Creates a new integer variable and adds it to the model.
-     *
-     * An integer variable represents an unknown value the solver must find.
-     * The variable can be optional.
-     * In this case, its value in a solution could be _absent_, meaning that the solution does not use the variable at all.
-     *
-     * @param params.range - Constraints the variable's value to be in the given range.
-     * @param params.optional - Whether the variable is optional (can take value _absent_). The default is `false`.
-     * @param params.name - The name of the variable. The default is `undefined`.
-     * @returns The created integer variable.
-     *
-     * @remarks
-     * The parameter `params.range` can be either a number or a tuple of two numbers.
-     * If a number is given, it represents a fixed value.
-     * If a tuple is given, it represents a range of possible values.
-     * The default range is `0` to `IntVarMax`.
-     * If a range is specified but one of the values is undefined (e.g., `range: [, 100]`), then the default value is used instead (in our case, `0`).
-     *
-     * @example
-     *
-     * ```ts
-     * let model = new CP.Model();
-     *
-     * // Create a present integer variable with with possible values 1..10:
-     * let x = model.intVar({ range: [1, 10], name: "x" });
-     *
-     * // Create an optional integer variable with possible values 5..IntVarMax:
-     * let y = model.intVar({ range: [5, ], optional: true, name: "y" });
-     *
-     * // Create an integer variable with a fixed value 10, but optional:
-     * let z = model.intVar({ range: 10, optional: true, name: "z" });
-     * ```
-     */
     intVar(params = {}) {
-        const x = new IntVar(this);
+        const x = IntVar._Create(this);
         if (params.name)
-            x.setName(params.name);
+            x.name = params.name;
         if (params.optional)
-            x.makeOptional();
-        if (typeof params.range === "number")
-            x.setRange(params.range, params.range);
+            x.optional = true;
+        if (typeof params.range === "number") {
+            x.min = params.range;
+            x.max = params.range;
+        }
         else if (Array.isArray(params.range)) {
             if (params.range[0] !== undefined)
-                x.setMin(params.range[0]);
+                x.min = params.range[0];
             if (params.range[1] !== undefined)
-                x.setMax(params.range[1]);
+                x.max = params.range[1];
         }
-        this.#model.push(x._getArg());
+        if (params.min !== undefined)
+            x.min = params.min;
+        if (params.max !== undefined)
+            x.max = params.max;
         this.#intVars.push(x);
         return x;
     }
     /** @internal */
     auxiliaryIntVar(params) {
-        let x = this.intVar(params);
+        let min = undefined;
+        let max = undefined;
+        if (params.range !== undefined) {
+            if (typeof params.range === "number") {
+                min = params.range;
+                max = params.range;
+            }
+            else {
+                min = params.range[0];
+                max = params.range[1];
+            }
+        }
+        let x = this.intVar({ optional: params.optional, name: params.name, min: min, max: max });
         x._makeAuxiliary();
         return x;
     }
     /** @internal */
     floatVar(params = {}) {
-        const x = new FloatVar(this);
+        const x = FloatVar._Create(this);
         if (params.name)
-            x.setName(params.name);
+            x.name = params.name;
         if (params.optional)
-            x.makeOptional();
-        if (typeof params.range === "number")
-            x.setRange(params.range, params.range);
-        else if (Array.isArray(params.range)) {
-            if (params.range[0] !== undefined)
-                x.setMin(params.range[0]);
-            if (params.range[1] !== undefined)
-                x.setMax(params.range[1]);
-        }
-        this.#model.push(x._getArg());
+            x.optional = true;
+        if (params.min !== undefined)
+            x.min = params.min;
+        if (params.max !== undefined)
+            x.max = params.max;
         this.#floatVars.push(x);
         return x;
     }
-    auxiliaryFloatVar(arg) {
-        let x = this.floatVar(arg);
+    /** @internal */
+    auxiliaryFloatVar(params) {
+        let x = this.floatVar(params);
         x._makeAuxiliary();
         return x;
     }
     /**
      * Creates a new interval variable and adds it to the model.
      *
+     * @param params.start (Optional) Fixed start time or range [min, max] (default [0, {@const IntervalMax}])
+     * @param params.end (Optional) Fixed end time or range [min, max] (default [0, {@const IntervalMax}])
+     * @param params.length (Optional) Fixed length or range [min, max] (default [0, {@const IntervalMax}])
+     * @param params.optional (Optional) Whether the interval is optional (default false)
+     * @param params.name (Optional) Name of the interval for debugging and display
+     *
+     * @returns The created interval variable.
+     *
+     * @remarks
      * An interval variable represents an unknown interval (a task, operation,
      * action) that the solver assigns a value in such a way as to satisfy all
      * constraints.  An interval variable has a start, end, and length. In a
      * solution, _start ≤ end_ and  _length = end - start_.
      *
      * The interval variable can be optional. In this case, its value in a solution
-     * could be _absent_, meaning that the task/operation is not performed.
+     * could be *absent*, meaning that the task/operation is not performed.
      *
-     * @param params.start - Constraints the start of the interval.
-     * @param params.end - Constraints the end of the interval.
-     * @param params.length - Constraints the length of the interval.
-     * @param params.optional - Whether the interval variable is optional (can take value _absent_). The default is `false`.
-     * @param params.name - The name of the interval variable. The default is `undefined`.
-     * @returns The created interval variable.
-     *
-     * @remarks
      * Parameters `params.start`, `params.end`, and `params.length` can be either a
      * number or a tuple of two numbers.  If a number is given, it represents a
      * fixed value. If a tuple is given, it represents a range of possible values.
-     * The default range for start, end and length is `0` to `IntervalMax`.
+     * The default range for start, end and length is `0` to {@link IntervalMax}.
      * If a range is specified but one of the values is undefined (e.g. `start: [, 100]`)
      * then the default value is used instead (in our case `0`).
      *
      * @example
-     *
      * ```ts
      * let model = new CP.Model();
      *
@@ -7475,87 +9086,92 @@ export class Model {
      * let z = model.intervalVar({ length: [5, 10], optional: true, name: "z" });
      * ```
      *
-     * @see {@link IntervalVar}
+     * @see {@link IntervalVar}.
      */
     intervalVar(params = {}) {
-        const itv = new IntervalVar(this);
-        if (typeof params.start === "number")
-            itv.setStart(params.start);
+        const itv = IntervalVar._Create(this);
+        if (typeof params.start === "number") {
+            itv.startMin = params.start;
+            itv.startMax = params.start;
+        }
         else if (Array.isArray(params.start)) {
             if (params.start[0] !== undefined)
-                itv.setStartMin(params.start[0]);
+                itv.startMin = params.start[0];
             if (params.start[1] !== undefined)
-                itv.setStartMax(params.start[1]);
+                itv.startMax = params.start[1];
         }
-        if (typeof params.end === "number")
-            itv.setEnd(params.end);
+        if (typeof params.end === "number") {
+            itv.endMin = params.end;
+            itv.endMax = params.end;
+        }
         else if (Array.isArray(params.end)) {
             if (params.end[0] !== undefined)
-                itv.setEndMin(params.end[0]);
+                itv.endMin = params.end[0];
             if (params.end[1] !== undefined)
-                itv.setEndMax(params.end[1]);
+                itv.endMax = params.end[1];
         }
-        if (typeof params.length === "number")
-            itv.setLength(params.length);
+        if (typeof params.length === "number") {
+            itv.lengthMin = params.length;
+            itv.lengthMax = params.length;
+        }
         else if (Array.isArray(params.length)) {
             if (params.length[0] !== undefined)
-                itv.setLengthMin(params.length[0]);
+                itv.lengthMin = params.length[0];
             if (params.length[1] !== undefined)
-                itv.setLengthMax(params.length[1]);
+                itv.lengthMax = params.length[1];
         }
         if (params.optional === true)
-            itv.makeOptional();
+            itv.optional = true;
         if (params.name !== undefined)
-            itv.setName(params.name);
-        this.#model.push(itv._getArg());
+            itv.name = params.name;
         this.#intervalVars.push(itv);
         return itv;
     }
     auxiliaryIntervalVar(param) {
-        let x = this.intervalVar(param);
+        const params = typeof param === 'string' ? { name: param } : param;
+        let x = this.intervalVar(params);
         x._makeAuxiliary();
         return x;
     }
     /**
-    * Creates a sequence variable from the provided set of interval variables.
-    *
-    * @param intervals Interval variables that will form the sequence in the solution.
-    * @param types Types of the intervals, used in particular for transition times.
-    *
-    * @remarks
-    *
-    * Sequence variable is used together with {@link SequenceVar.noOverlap}
-    * constraint to model a set of intervals that cannot overlap and so they form
-    * a sequence in the solution. Sequence variable allows us to constrain the sequence further.
-    * For example, by specifying sequence-dependent minimum
-    * transition times.
-    *
-    * Types can be used to mark intervals with similar properties. In
-    * particular, they behave similarly in terms of transition times.
-    * Interval variable `intervals[0]` will have type `type[0]`, `intervals[1]`
-    * will have type `type[1]` and so on.
-    *
-    * If `types` are not specified then `intervals[0]` will have type 0,
-    * `intervals[1]` will have type 1, and so on.
-    *
-    * :::info Types
-    * The length of the array `types` must be the same as the length of the array
-    * `intervals`.
-    *
-    * Types should be integer numbers in the range `0` to `n-1` where `n` is the
-    * number of types.
-    * :::
-    *
-    * @see {@link SequenceVar.noOverlap | SequenceVar.noOverlap} for an example of sequenceVar usage with transition times.
-    * @see {@link SequenceVar}
-    * @see {@link Model.noOverlap | Model.noOverlap}
-    *  */
-    sequenceVar(intervals, types) {
+     * Creates a sequence variable from the provided set of interval variables.
+     *
+     * @param intervals Interval variables that will form the sequence in the solution
+     * @param types (Optional) Types of the intervals, used in particular for transition times
+     * @param name (Optional) Name assigned to the sequence variable
+     *
+     * @returns The created sequence variable
+     *
+     * @remarks
+     * Sequence variable is used together with {@link SequenceVar.noOverlap}
+     * constraint to model a set of intervals that cannot overlap and so they form
+     * a sequence in the solution. Sequence variable allows us to constrain the sequence further.
+     * For example, by specifying sequence-dependent minimum
+     * transition times.
+     *
+     * Types can be used to mark intervals with similar properties. In
+     * particular, they behave similarly in terms of transition times.
+     * Interval variable `intervals[0]` will have type `type[0]`, `intervals[1]`
+     * will have type `type[1]` and so on.
+     *
+     * If `types` are not specified then `intervals[0]` will have type 0,
+     * `intervals[1]` will have type 1, and so on.
+     *
+     * The length of the array `types` must be the same as the length of the array
+     * `intervals`. Types should be integer numbers in the range `0` to `n-1` where `n` is the
+     * number of types.
+     *
+     * @see {@link SequenceVar.noOverlap} for an example of sequenceVar usage with transition times.
+     * @see {@link SequenceVar}.
+     * @see {@link Model.noOverlap}.
+     */
+    sequenceVar(intervals, types, name) {
         let outParams = [this._getIntervalVarArray(intervals)];
         if (types !== undefined)
             outParams.push(this._getIntArray(types));
-        const result = new SequenceVar(this, "sequenceVar", outParams);
-        this.#model.push(result._getArg());
+        const result = SequenceVar._Create(this, "sequenceVar", outParams);
+        if (name !== undefined)
+            result.name = name;
         return result;
     }
     /** @internal */
@@ -7567,30 +9183,31 @@ export class Model {
     /**
      * Creates a boolean expression that is true if the given argument is present in the solution.
      *
-     * @param arg - The argument to check for presence in the solution.
+     * @param arg The argument to check for presence in the solution
+     *
      * @returns A boolean expression that is true if the argument is present in the solution.
      *
      * @remarks
      * The value of the expression remains unknown until a solution is found.
      * The expression can be used in a constraint to restrict possible solutions.
      *
-     * The function is equivalent to {@link IntervalVar.presence | IntervalVar.presence}
-     * and {@link IntExpr.presence | IntExpr.presence}.
+     * The function is equivalent to {@link IntervalVar.presence}
+     * and {@link IntExpr.presence}.
      *
      * @example
      *
      * In the following example, interval variables `x` and `y` must have the same presence status.
-     * I.e. they must either be both _present_ or both _absent_.
+     * I.e. they must either be both *present* or both *absent*.
      *
      * ```ts
      * const model = new CP.Model();
      *
      * let x = model.intervalVar({ name: "x", optional: true, length: 10, start: [0, 100] });
      * let y = model.intervalVar({ name: "y", optional: true, length: 10, start: [0, 100] });
-     * model.constraint(model.presenceOf(x).eq(model.presenceOf(y)));
+     * model.enforce(model.presence(x).eq(model.presence(y)));
      * ```
      *
-     * #### Simple constraints over presence
+     * ### Simple constraints over presence
      *
      * The solver treats binary constraints over presence in a special way: it
      * uses them to better propagate other constraints over the same pairs of variables.
@@ -7600,116 +9217,212 @@ export class Model {
      * ```ts
      * let x = model.intervalVar({ name: "x", optional: true, length: 10, start: [0, 100] });
      * let y = model.intervalVar({ name: "y", optional: true, length: 10, start: [0, 100] });
-     * model.constraint(model.presenceOf(x).eq(model.presenceOf(y)));
+     * model.enforce(model.presence(x).eq(model.presence(y)));
      * // x.end <= y.start:
-     * let isBefore = x.end().le(y.start());
-     * model.constraint(isBefore);
+     * let precedence = x.end().le(y.start());
+     * model.enforce(precedence);
      * ```
      *
      * In this example, the solver sees (propagates) that the minimum start time of
      * `y` is 10 and maximum end time of `x` is 90.  Without the constraint over
-     * `presenceOf`, the solver could not propagate that because one
-     * of the intervals can be _absent_ and the other one _present_ (and so the
-     * value of `isBefore` would be _absent_ and the constraint would be
+     * `presence`, the solver could not propagate that because one
+     * of the intervals can be *absent* and the other one *present* (and so the
+     * value of `precedence` would be *absent* and the constraint would be
      * satisfied).
      *
      * To achieve good propagation, it is recommended to use binary
-     * constraints over `presenceOf` when possible. For example, multiple binary
+     * constraints over `presence` when possible. For example, multiple binary
      * constraints can be used instead of a single complicated constraint.
      */
-    presenceOf(arg) {
+    presence(arg) {
         if (IsIntExpr(arg))
-            return new BoolExpr(this, "intPresenceOf", [GetSafeArg(arg)]);
-        return new BoolExpr(this, "intervalPresenceOf", [GetIntervalVar(arg)]);
+            return BoolExpr._Create(this, "intPresenceOf", [GetSafeArg(arg)]);
+        return BoolExpr._Create(this, "intervalPresenceOf", [GetIntervalVar(arg)]);
+    }
+    sum(args) {
+        if (args.length === 0)
+            return 0;
+        if (args[0] instanceof CumulExpr)
+            return CumulExpr._Create(this, "cumulSum", [this._getCumulExprArray(args)]);
+        return IntExpr._Create(this, "intSum", [this._getIntExprArray(args)]);
+    }
+    plus(lhs, rhs) {
+        if (lhs instanceof CumulExpr)
+            return CumulExpr._Create(this, "cumulPlus", [GetCumulExpr(lhs), GetCumulExpr(rhs)]);
+        return IntExpr._Create(this, "intPlus", [GetIntExpr(lhs), GetIntExpr(rhs)]);
+    }
+    minus(lhs, rhs) {
+        if (lhs instanceof CumulExpr)
+            return CumulExpr._Create(this, "cumulMinus", [GetCumulExpr(lhs), GetCumulExpr(rhs)]);
+        return IntExpr._Create(this, "intMinus", [GetIntExpr(lhs), GetIntExpr(rhs)]);
+    }
+    le(lhs, rhs) {
+        if (lhs instanceof CumulExpr)
+            return Constraint._Create(this, "cumulLe", [GetCumulExpr(lhs), GetInt(rhs)]);
+        return BoolExpr._Create(this, "intLe", [GetIntExpr(lhs), GetIntExpr(rhs)]);
+    }
+    ge(lhs, rhs) {
+        if (lhs instanceof CumulExpr)
+            return Constraint._Create(this, "cumulGe", [GetCumulExpr(lhs), GetInt(rhs)]);
+        return BoolExpr._Create(this, "intGe", [GetIntExpr(lhs), GetIntExpr(rhs)]);
+    }
+    neg(arg) {
+        if (arg instanceof CumulExpr)
+            return CumulExpr._Create(this, "cumulNeg", [GetCumulExpr(arg)]);
+        return IntExpr._Create(this, "intNeg", [GetIntExpr(arg)]);
+    }
+    /** @deprecated Use `Model.presence` instead. */
+    presenceOf(arg) {
+        return this.presence(arg);
+    }
+    /** @deprecated Use `Model.start` isntead. */
+    startOf(interval) {
+        return this.start(interval);
+    }
+    /** @deprecated Use `Model.end` instead. */
+    endOf(interval) {
+        return this.end(interval);
+    }
+    /** @deprecated Use `Model.length` instead. */
+    lengthOf(interval) {
+        return this.length(interval);
+    }
+    /** @deprecated Use `Model.sum` instead. */
+    cumulSum(args) {
+        return this.sum(args);
+    }
+    /** @deprecated Use `Model.plus` instead. */
+    cumulPlus(lhs, rhs) {
+        return this.plus(lhs, rhs);
+    }
+    /** @deprecated Use `Model.minus` instead. */
+    cumulMinus(lhs, rhs) {
+        return this.minus(lhs, rhs);
+    }
+    /** @deprecated Use `Model.le` instead. */
+    cumulLe(cumul, maxCapacity) {
+        return this.le(cumul, maxCapacity);
+    }
+    /** @deprecated Use `Model.ge` instead. */
+    cumulGe(cumul, minCapacity) {
+        return this.ge(cumul, minCapacity);
+    }
+    /** @deprecated Use `CumulExpr.neg` instead. */
+    cumulNeg(arg) {
+        return this.neg(arg);
+    }
+    /** @deprecated Use `Model.integral` instead. */
+    stepFunctionSum(func, interval) {
+        return this.integral(func, interval);
+    }
+    /** @deprecated Use `Model.eval` instead. */
+    stepFunctionEval(func, x) {
+        return this.eval(func, x);
     }
     /**
-     * Minimize the provided expression. I.e., search for a solution that achieves the minimal
-     * value of the expression.
+     * Creates a minimization objective for the provided expression.
      *
-     * @param expr The expression to minimize.
+     * @param expr The expression to minimize
+     *
+     * @returns An Objective that minimizes the expression.
      *
      * @remarks
-     * Equivalent of function {@link IntExpr.minimize | IntExpr.minimize}.
+     * Creates an {@link Objective} to minimize the given expression.
+     * A model can have at most one objective. New objective replaces the old one.
+     *
+     * Equivalent of function {@link IntExpr.minimize}.
      *
      * @example
      *
      * In the following model, we search for a solution that minimizes the maximum
      * end of the two intervals `x` and `y`:
+     *
      * ```ts
      * let model = new CP.Model();
      * let x = model.intervalVar({ length: 10, name: "x" });
      * let y = model.intervalVar({ length: 20, name: "y" });
      * model.minimize(model.max2(x.end(), y.end()));
-     * let result = await CP.solve(model);
+     * let result = await model.solve();
      * ```
-     * @see {@link maximize}
+     *
+     * @see {@link Model.maximize}.
+     * @see {@link IntExpr.minimize} for fluent-style minimization.
      */
     minimize(expr) {
-        this.#objective = new Objective(this, "minimize", [GetIntExpr(expr)])._getProps();
+        let result = Objective._Create(this, "minimize", [GetIntExpr(expr)]);
+        this.#objective = result._getProps();
         this.#primaryObjectiveExpr = expr;
+        return result;
     }
     /**
-     * Maximize the provided expression. I.e., search for a solution that achieves the maximal
-     * value of the expression.
+     * Creates a maximization objective for the provided expression.
      *
-     * @param expr The expression to maximize.
+     * @param expr The expression to maximize
+     *
+     * @returns An Objective that maximizes the expression.
      *
      * @remarks
-     * Equivalent of function {@link IntExpr.maximize | IntExpr.maximize}.
+     * Creates an {@link Objective} to maximize the given expression.
+     * A model can have at most one objective. New objective replaces the old one.
+     *
+     * Equivalent of function {@link IntExpr.maximize}.
      *
      * @example
      *
      * In the following model, we search for a solution that maximizes
      * the length of the interval variable `x`:
+     *
      * ```ts
-     * let model = new CP.Model();
+     * let model = new CP.Model;
      * let x = model.intervalVar({ length: [10, 20], name: "x" });
      * model.maximize(x.length());
-     * let result = await CP.solve(model);
+     * let result = await model.solve();
      * ```
      *
-     * @see {@link minimize}
+     * @see {@link Model.minimize}.
+     * @see {@link IntExpr.maximize} for fluent-style maximization.
      */
     maximize(expr) {
-        this.#objective = new Objective(this, "maximize", [GetIntExpr(expr)])._getProps();
+        let result = Objective._Create(this, "maximize", [GetIntExpr(expr)]);
+        this.#objective = result._getProps();
         this.#primaryObjectiveExpr = expr;
+        return result;
     }
     /** @internal */
     _minimizeConsecutively(arg) {
-        this.#objective = new Objective(this, "minimizeConsecutively", [this._getIntExprArray(arg)])._getProps();
+        this.#objective = Objective._Create(this, "minimizeConsecutively", [this._getIntExprArray(arg)])._getProps();
         this.#primaryObjectiveExpr = arg[0];
     }
     /** @internal */
     _maximizeConsecutively(arg) {
-        this.#objective = new Objective(this, "maximizeConsecutively", [this._getIntExprArray(arg)])._getProps();
+        this.#objective = Objective._Create(this, "maximizeConsecutively", [this._getIntExprArray(arg)])._getProps();
         this.#primaryObjectiveExpr = arg[0];
     }
     /**
-     * Creates a new {@link IntStepFunction}.
+     * Creates a new integer step function.
      *
-     * @param values An array of points defining the step function in the form
-     *               $[[x_0, y_0], [x_1, y_1], \dots, [x_n, y_n]]$, where $x_i$ and $y_i$ are integers.
-     *               The array must be sorted by $x_i$.
+     * @param values An array of points defining the step function in the form [[x0, y0], [x1, y1], ..., [xn, yn]], where xi and yi are integers. The array must be sorted by xi
+     *
+     * @returns The created step function
      *
      * @remarks
-     *
      * Integer step function is a piecewise constant function defined on integer
      * values in range {@link IntVarMin} to {@link IntVarMax}.  The function is
      * defined as follows:
      *
-     *  * $f(x) = 0$ for $x < x_0$,
-     *  * $f(x) = y_i$ for $x_i \leq x < x_{i+1}$
-     *  * $f(x) = y_n$ for $x \geq x_n$.
+     * * $f(x) = 0$ for $x < x_0$,
+     * * $f(x) = y_i$ for $x_i \leq x < x_{i+1}$
+     * * $f(x) = y_n$ for $x \geq x_n$.
      *
      * Step functions can be used in the following ways:
      *
-     *   * Function {@link Model.stepFunctionEval} evaluates the function at the given point (given as {@link IntExpr}).
-     *   * Function {@link Model.stepFunctionSum} computes a sum (integral) of the function over an {@link IntervalVar}.
-     *   * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
-     *   * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
+     * * Function {@link Model.eval} evaluates the function at the given point (given as {@link IntExpr}).
+     * * Function {@link Model.integral} computes a sum (integral) of the function over an {@link IntervalVar}.
+     * * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
+     * * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
      */
     stepFunction(values) {
-        return new IntStepFunction(this, values);
+        return IntStepFunction._CreateWithValues(this, values);
     }
     /** @internal */
     getPrimaryObjectiveExpression() {
@@ -7727,9 +9440,12 @@ export class Model {
         };
     }
     /** @internal */
-    _serialize(command, params, warmStart) {
-        let data = this._toObject(params, warmStart);
-        data.msg = command;
+    _serialize(command, params, warmStart, deferSolution) {
+        const data = {
+            ...this._toObject(params, warmStart),
+            msg: command,
+            deferSolution: deferSolution || undefined // Only include if true
+        };
         let jsonModel = JSON.stringify(data);
         // TODO:1 Is the name OPTALCP_MODEL good? It is not only Model, it is Model + Parameters + WarmStart..
         let modelFile = process.env.OPTALCP_MODEL;
@@ -7757,10 +9473,10 @@ export class Model {
         if (this.#objective) {
             // Decode primary objective expression from the objective
             let primaryObjectiveArg = undefined;
-            if (this.#objective.func == "minimize" || this.#objective.func == "maximize")
+            if (this.#objective.func === "minimize" || this.#objective.func === "maximize")
                 primaryObjectiveArg = this.#objective.args[0];
             else {
-                assert(this.#objective.func == "minimizeConsecutively" || this.#objective.func == "maximizeConsecutively");
+                assert(this.#objective.func === "minimizeConsecutively" || this.#objective.func === "maximizeConsecutively");
                 let args = this.#objective.args[0];
                 primaryObjectiveArg = args[0];
             }
@@ -7777,18 +9493,18 @@ export class Model {
                     primaryObjectiveArg.ref = this._getNewRefId(primaryObjectiveArg.arg);
                     primaryObjectiveArg.arg = undefined;
                 }
-                this.#primaryObjectiveExpr = new IntExpr(this, "reusableIntExpr", [primaryObjectiveArg]);
+                this.#primaryObjectiveExpr = IntExpr._Create(this, "reusableIntExpr", [primaryObjectiveArg]);
             }
         }
         // Find variables in the model
         for (let i = 0; i < this.#refs.length; i++) {
             let props = this.#refs[i];
-            if (props.func == "boolVar")
-                this.#boolVars.push(new BoolVar(this, props, i));
-            else if (props.func == "intVar")
-                this.#intVars.push(new IntVar(this, props, i));
-            else if (props.func == "intervalVar")
-                this.#intervalVars.push(new IntervalVar(this, props, i));
+            if (props.func === "boolVar")
+                this.#boolVars.push(BoolVar._CreateFromJSON(this, props, i));
+            else if (props.func === "intVar")
+                this.#intVars.push(IntVar._CreateFromJSON(this, props, i));
+            else if (props.func === "intervalVar")
+                this.#intervalVars.push(IntervalVar._CreateFromJSON(this, props, i));
         }
     }
     /** @internal */
@@ -7801,7 +9517,7 @@ export class Model {
     _getFloatArray(arg) {
         if (TYPE_CHECK_LEVEL >= 2) {
             for (const item of arg)
-                assert(typeof item == 'number');
+                assert(typeof item === 'number');
         }
         return this.#wrapConstArray(arg);
     }
@@ -7845,14 +9561,14 @@ export class Model {
         let n = arg.length;
         for (const row of arg) {
             assert(Array.isArray(row));
-            assert(row.length == n);
+            assert(row.length === n);
             for (const item of row)
                 assert(Number.isInteger(item));
         }
         let knownNode = this.#knownArrays.get(arg);
         if (knownNode !== undefined)
             return knownNode._getArg();
-        let node = new ArrayNode(this, "matrix", [arg]);
+        let node = ArrayNode._Create(this, "matrix", [arg]);
         this.#knownArrays.set(arg, node);
         return node._getArg();
     }
@@ -7866,7 +9582,7 @@ export class Model {
         let knownNode = this.#knownArrays.get(arg);
         if (knownNode !== undefined)
             return knownNode._getArg();
-        let node = new ArrayNode(this, "array", arg);
+        let node = ArrayNode._Create(this, "array", arg);
         this.#knownArrays.set(arg, node);
         return node._getArg();
     }
@@ -7880,7 +9596,7 @@ export class Model {
         let nodeArgs = [];
         for (let i = 0; i < arg.length; i++)
             nodeArgs.push(arg[i]._getArg());
-        let node = new ArrayNode(this, "array", nodeArgs);
+        let node = ArrayNode._Create(this, "array", nodeArgs);
         this.#knownArrays.set(arg, node);
         return node._getArg();
     }
@@ -7893,12 +9609,36 @@ export class Model {
         let nodeArgs = [];
         for (let i = 0; i < arg.length; i++)
             nodeArgs.push(argFunc(arg[i]));
-        let node = new ArrayNode(this, "array", nodeArgs);
+        let node = ArrayNode._Create(this, "array", nodeArgs);
         this.#knownArrays.set(arg, node);
         return node._getArg();
     }
     /**
-     * Returns an array of all interval variables in the model.
+     * Returns a list of all interval variables in the model.
+     *
+     * @returns A list of all interval variables in the model
+     *
+     * @remarks
+     * Returns a copy of the list containing all interval variables that have been
+     * created in this model using {@link Model.intervalVar}.
+     *
+     * @see {@link Model.getIntVars}, {@link Model.getBoolVars}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const task1 = model.intervalVar({ length: 10, name: "task1" });
+     * const task2 = model.intervalVar({ length: 20, name: "task2" });
+     *
+     * const intervals = model.getIntervalVars();
+     * console.log(intervals.length);  // 2
+     * for (const iv of intervals) {
+     *     console.log(iv.getName());  // "task1", "task2"
+     * }
+     * ```
      */
     getIntervalVars() {
         // Return a copy of the array to prevent the user from modifying it:
@@ -7909,38 +9649,361 @@ export class Model {
         return [...this.#boolVars];
     }
     /**
-     * Returns an array of all interval variables in the model.
+     * Returns a list of all integer variables in the model.
+     *
+     * @returns A list of all integer variables in the model
+     *
+     * @remarks
+     * Returns a copy of the list containing all integer variables that have been
+     * created in this model using {@link Model.intVar}.
+     *
+     * @see {@link Model.getIntervalVars}, {@link Model.getBoolVars}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar(0, 10, "x");
+     * const y = model.intVar(0, 100, "y");
+     *
+     * const intVars = model.getIntVars();
+     * console.log(intVars.length);  // 2
+     * for (const iv of intVars) {
+     *     console.log(iv.getName());  // "x", "y"
+     * }
+     * ```
      */
     getIntVars() {
         return [...this.#intVars];
     }
+    /**
+     * Solves the model and returns the result.
+     *
+     * @param params (Optional) The parameters for solving
+     * @param warm_start (Optional) The solution to start with
+     *
+     * @returns The result of the solve.
+     *
+     * @remarks
+     * Solves the model using the OptalCP solver and returns the result. This is the
+     * main entry point for solving constraint programming models.
+     *
+     * The solver searches for solutions that satisfy all constraints in the model.
+     * If an objective was specified (using {@link Model.minimize} or
+     * {@link Model.maximize}), the solver searches for optimal or near-optimal
+     * solutions within the given time limit.
+     *
+     * The returned {@link SolveResult} contains:
+     *
+     * * `solution` - The best solution found, or `None` if no solution was found.
+     *   Use this to query variable values via methods like `get_start()`, `get_end()`,
+     *   and `get_value()`.
+     * * `objective` - The objective value of the best solution (if an objective
+     *   was specified).
+     * * `nb_solutions` - The total number of solutions found during the search.
+     * * `proof` - Whether the solver proved optimality or infeasibility.
+     * * `duration` - The total time spent solving.
+     * * Statistics like `nb_branches`, `nb_fails`, and `nb_restarts`.
+     *
+     * When an error occurs (e.g., invalid model, solver not found), the function
+     * raises an exception.
+     *
+     * ### Parameters
+     *
+     * Solver behavior can be controlled via the `params` argument. Common parameters
+     * include:
+     *
+     * * `timeLimit` - Maximum solving time in seconds.
+     * * `solutionLimit` - Stop after finding this many solutions.
+     * * `nbWorkers` - Number of parallel threads to use.
+     * * `searchType` - Search strategy (`"LNS"`, `"FDS"`, etc.).
+     *
+     * See {@link Parameters} for the complete list.
+     *
+     * ### Warm start
+     *
+     * If the `warm_start` parameter is specified, the solver will start with the
+     * given solution. The solution must be compatible with the model; otherwise,
+     * an error will be raised. The solver will take advantage of the
+     * solution to speed up the search: it will search only for better solutions
+     * (if it is a minimization or maximization problem). The solver may also try to
+     * improve the provided solution by Large Neighborhood Search.
+     *
+     * ### Advanced usage
+     *
+     * This is a simple blocking function for basic usage. For advanced features
+     * like event callbacks, progress monitoring, or async support, use the
+     * {@link Solver} class instead.
+     *
+     * This method works seamlessly in both regular Python scripts and Jupyter
+     * notebooks. In Jupyter (where an event loop is already running), it
+     * automatically handles nested event loops.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "task_x" });
+     * const y = model.intervalVar({ length: 20, name: "task_y" });
+     * x.endBeforeStart(y);
+     * model.minimize(y.end());
+     *
+     * // Basic solve
+     * let result = await model.solve();
+     * console.log(`Objective: ${result.objective}`);
+     *
+     * // Solve with parameters
+     * const params = { timeLimit: 60, searchType: "LNS" };
+     * result = await model.solve(params);
+     *
+     * // Solve with warm start
+     * if (result.solution) {
+     *   const result2 = await model.solve(params, result.solution);
+     * }
+     * ```
+     *
+     * @see {@link Solver} for async solving with event callbacks.
+     * @see {@link Parameters} for available solver parameters.
+     * @see {@link SolveResult} for the result structure.
+     * @see {@link Solution} for working with solutions.
+     *
+     * @group Solving
+     */
+    async solve(params, warmStart) {
+        let solver = new Solver();
+        return solver.solve(this, params, warmStart);
+    }
+    /**
+     * Exports the model to JSON format.
+     *
+     * @param params (Optional) Optional solver parameters to include
+     * @param warmStart (Optional) Optional initial solution to include
+     *
+     * @returns A string containing the model in JSON format.
+     *
+     * @remarks
+     * The result can be stored in a file for later use. The model can be
+     * converted back from JSON format using {@link Model.fromJSON}.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     * import * as fs from "fs";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "task_x" });
+     * const y = model.intervalVar({ length: 20, name: "task_y" });
+     * x.endBeforeStart(y);
+     * model.minimize(y.end());
+     *
+     * // Export to JSON
+     * const jsonStr = model.toJSON();
+     *
+     * // Save to file
+     * fs.writeFileSync("model.json", jsonStr);
+     *
+     * // Later, load from JSON
+     * const { model: model2, params: params2, warmStart: warmStart2 } =
+     *   CP.Model.fromJSON(jsonStr);
+     * ```
+     *
+     * @see {@link Model.fromJSON} to import from JSON.
+     * @see {@link Model.toText} to export as text format.
+     * @see {@link Model.toJS} to export as JavaScript code.
+     *
+     * @group Model exporting
+     */
+    toJSON(parameters, warmStart) {
+        return JSON.stringify(this._toObject(parameters, warmStart));
+    }
+    /**
+     * Creates a model from JSON format.
+     *
+     * @param jsonStr A string containing the model in JSON format
+     *
+     * @returns A tuple containing the model, optional parameters, and optional warm start solution.
+     *
+     * @remarks
+     * Creates a new Model instance from a JSON string that was previously
+     * exported using {@link Model.toJSON}.
+     *
+     * The method returns a tuple with three elements:
+     * 1. The reconstructed Model
+     * 2. Parameters (if they were included in the JSON), or None
+     * 3. Warm start Solution (if it was included in the JSON), or None
+     *
+     * Variables in the new model can be accessed using methods like
+     * {@link Model.getIntervalVars}, {@link Model.getIntVars}, etc.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     * import * as fs from "fs";
+     *
+     * // Create and export a model
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "task_x" });
+     * model.minimize(x.end());
+     *
+     * const params = { timeLimit: 60000 };
+     * const jsonStr = model.toJSON(params);
+     *
+     * // Save to file
+     * fs.writeFileSync("model.json", jsonStr);
+     *
+     * // Later, load from file
+     * const loadedJson = fs.readFileSync("model.json", "utf-8");
+     *
+     * // Restore model (returns Model directly in TypeScript)
+     * const model2 = CP.Model.fromJSON(loadedJson);
+     *
+     * // Access variables
+     * const intervalVars = model2.getIntervalVars();
+     * console.log(`Loaded model with ${intervalVars.length} interval variables`);
+     *
+     * // Solve with restored parameters
+     * const result = await model2.solve(params);
+     * ```
+     *
+     * @see {@link Model.toJSON} to export to JSON.
+     *
+     * @group Model exporting
+     */
+    static fromJSON(jsonStr) {
+        let data = JSON.parse(jsonStr);
+        let model = new Model;
+        model._fromObject(data);
+        let params = paramsFromJSON(data.parameters);
+        let warmStart = undefined;
+        if (data.warmStart !== undefined) {
+            warmStart = new Solution;
+            warmStart._init(data.warmStart);
+        }
+        return { model: model, parameters: params, warmStart: warmStart };
+    }
+    /**
+     * Converts the model to equivalent JavaScript code.
+     *
+     * @param params (Optional) Optional solver parameters (included in generated code)
+     * @param warmStart (Optional) Optional initial solution to include
+     *
+     * @returns JavaScript code representing the model.
+     *
+     * @remarks
+     * The output is human-readable, executable with Node.js, and can be stored
+     * in a file. It is meant as a way to export a model to a format that is
+     * executable, human-readable, editable, and independent of other libraries.
+     *
+     * This feature is experimental and the result is not guaranteed to be valid
+     * in all cases.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     * import * as fs from "fs";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "task_x" });
+     * const y = model.intervalVar({ length: 20, name: "task_y" });
+     * x.endBeforeStart(y);
+     * model.minimize(y.end());
+     *
+     * // Convert to JavaScript code
+     * const jsCode = model.toJS();
+     * console.log(jsCode);
+     *
+     * // Save to file
+     * fs.writeFileSync("model.js", jsCode);
+     * ```
+     *
+     * @see {@link Model.toText} to export as text format.
+     * @see {@link Model.toJSON} to export as JSON (can be imported back).
+     *
+     * @group Model exporting
+     */
+    toJS(params, warmStart) {
+        return _toText(this, "toJS", params, warmStart);
+    }
+    /**
+     * Converts the model to text format similar to IBM CP Optimizer file format.
+     *
+     * @param params (Optional) Optional solver parameters (mostly unused)
+     * @param warm_start (Optional) Optional initial solution to include
+     *
+     * @returns Text representation of the model.
+     *
+     * @remarks
+     * The output is human-readable and can be stored in a file. Unlike JSON format,
+     * there is no way to convert the text format back into a Model.
+     *
+     * The result is so similar to the file format used by IBM CP Optimizer that,
+     * under some circumstances, the result can be used as an input file for
+     * CP Optimizer. However, some differences between OptalCP and CP Optimizer
+     * make it impossible to guarantee the result is always valid for CP Optimizer.
+     *
+     * Known issues:
+     *
+     * * OptalCP supports optional integer expressions, while CP Optimizer does not.
+     *   If the model contains optional integer expressions, the result will not be
+     *   valid for CP Optimizer or may be badly interpreted. For example, to get
+     *   a valid CP Optimizer file, don't use `interval.start()`, use
+     *   `interval.start_or(default)` instead.
+     * * For the same reason, prefer precedence constraints such as
+     *   `end_before_start()` over `model.enforce(x.end() <= y.start())`.
+     * * Negative heights in cumulative expressions (e.g., in `step_at_start()`)
+     *   are not supported by CP Optimizer.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     * import * as fs from "fs";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "task_x" });
+     * const y = model.intervalVar({ length: 20, name: "task_y" });
+     * x.endBeforeStart(y);
+     * model.minimize(y.end());
+     *
+     * // Convert to text format
+     * const text = model.toText();
+     * console.log(text);
+     *
+     * // Save to file
+     * fs.writeFileSync("model.txt", text);
+     * ```
+     *
+     * @see {@link Model.toJS} to export as JavaScript code.
+     * @see {@link Model.toJSON} to export as JSON (can be imported back).
+     *
+     * @group Model exporting
+     */
+    toText(params, warmStart) {
+        return _toText(this, "toText", params, warmStart);
+    }
 }
 /**
- * @noInheritDoc
- *
+ * @remarks
  * The solver provides asynchronous communication with the solver.
  *
- * Unlike function {@link solve}, `Solver` allows the user to process individual events
+ * Unlike function {@link Model.solve}, `Solver` allows the user to process individual events
  * during the solve and to stop the solver at any time.  If you're
- * interested in the final result only, use {@link solve} instead.
+ * interested in the final result only, use {@link Model.solve} instead.
  *
  * To solve a model, create a new `Solver` object and call its method {@link Solver.solve}.
  *
  * Solver inherits from `EventEmitter` class from Node.js.  You can subscribe to
  * events using the standard Node.js `on` method.  The following events are
  * emitted:
- *   * `error`: Emits an instance of `Error` (standard Node.js class) when an error occurs.
- *   * `warning`: Emits a `string` for every issued warning.
- *   * `log`: Emits a `string` for every log message.
- *   * `trace`: Emits a `string` for every trace message.
- *   * `solution`: Emits a {@link SolutionEvent} when a solution is found.
- *   * `lowerBound`: Emits a {@link LowerBoundEvent} when a new lower bound is proved.
- *   * `summary`: Emits {@link SolveSummary} at the end of the solve.
- *   * `close`: Emits `void`. It is always the last event emitted.
+ * * `error`: Emits an instance of `Error` (standard Node.js class) when an error occurs.
+ * * `warning`: Emits a `string` for every issued warning.
+ * * `log`: Emits a `string` for every log message.
+ * * `trace`: Emits a `string` for every trace message.
+ * * `solution`: Emits a {@link SolutionEvent} when a solution is found.
+ * * `objectiveBound`: Emits a {@link ObjectiveBoundEntry} when a new lower bound is proved.
+ * * `summary`: Emits {@link SolveSummary} at the end of the solve.
+ * * `close`: Emits `void`. It is always the last event emitted.
  *
- * The solver output (log, trace, and warnings) is printed on the console by default,
- * it can be redirected to a file or a stream or suppressed completely using
- * function {@link redirectOutput}.
+ * The solver output (log, trace, and warnings) is printed on the console by default.
+ * It can be redirected to a file or a stream, or suppressed completely using the
+ * {@link Parameters.printLog} parameter.
  *
  * @example
  *
@@ -7995,60 +10058,476 @@ export class Model {
  *
  * @group Solving
  */
-export class Solver extends EventEmitter {
-    #solver; // Spawned solver process
-    #rlStdout; // stdout of the solver process, wrapped in readline
-    #rlClosed = true;
-    #solverClosed = false;
+export class Solver {
+    // === Process state (reset by _resetProcessState at end of _run) ===
+    #connection;
     #closeExpected = false;
     #initialized = false;
-    #errStreamBuffer = "";
-    #hasColors = process.stdout.isTTY;
-    #outputStream = process.stdout;
-    // Information collected about the solve for SolveResult:
+    #handshakeReceived = false;
+    // === Promise fields for start/close synchronization ===
+    #startPromise;
+    #startResolve;
+    #closedPromise;
+    #closedResolve;
+    #closedReject;
+    // === Result state (reset by _resetResultState after extracting results) ===
     #summary = undefined;
     #objectiveHistory = [];
-    #lowerBoundHistory = [];
-    #bestSolution = undefined;
-    #bestSolutionTime = undefined;
-    #bestLBTime = undefined;
-    #bestSolutionValid = undefined;
+    objectiveBoundHistory = [];
+    #solution = undefined;
+    #solutionTime = undefined;
+    boundTime = undefined;
+    #solutionValid = undefined;
+    #errorMessages = [];
+    // === User configuration (never reset, preserved across multiple solves) ===
+    #hasColors = process.stdout.isTTY;
+    #outputStream = process.stdout;
     // User can pipe the output into `less` command. And the just quit less.
     // In this case we want to stop ASAP.
     #outputStreamErrorCallback = () => {
-        this.stop("Error in output stream");
+        void this.stop("Error in output stream");
     };
-    // For type safety, we declared the events that are emitted by this class
-    // above.  Another option is to use an interface, then we would an interface,
-    // then we would not have to implement the function below.
-    // But then typedoc @noInheritDoc does not work.
-    on(event, listener) {
-        return super.on(event, listener);
-    }
+    // === Solve state (prevents concurrent solves and callback changes during solve) ===
+    #solving = false;
+    // === Private callback fields (with public getters/setters that check #solving) ===
+    #onSolution;
+    #onObjectiveBound;
+    #onSummary;
+    #onLog;
+    #onWarning;
+    #onError;
+    // === Public callback properties (persist across solves) ===
     /**
-     * Solves a given model with the given parameters.
-     *
-     * @param model The model to solve
-     * @param params The parameters for the solver
-     * @param warmStart An initial solution to start the solver with
-     * @param log A stream to redirect the solver output to. If `null`, the output is suppressed.
-     *            If `undefined`, the output stream is not changed (the default is standard output).
-     * @returns A promise that resolves to a {@link SolveResult} object when the solve is finished.
+     * Callback for solution events from the solver.
      *
      * @remarks
+     * The callback is called each time the solver finds a new solution. The default is no callback.
      *
-     * The solving process starts asynchronously. Use `await` to wait for the
+     * The callback receives one argument:
+     *
+     * - `event` ({@link SolutionEvent}): An object with the following fields:
+     *    - `solution` ({@link Solution}): The solution object with variable values.
+     *    - `solveTime` (`number`): Time when the solution was found (seconds since solve start).
+     *    - `valid` (`boolean | undefined`): Solution verification result if enabled, `undefined` otherwise.
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * solver.onSolution = (event: CP.SolutionEvent) => {
+     *   const sol = event.solution;
+     *   const time = event.solveTime;
+     *   console.log(`Solution found at ${time.toFixed(2)}s, objective=${sol.getObjective()}`);
+     * };
+     *
+     * // Asynchronous callback
+     * solver.onSolution = async (event: CP.SolutionEvent) => {
+     *   const sol = event.solution;
+     *   await saveToDatabase(sol);
+     * };
+     * ```
+     *
+     * @see {@link SolutionEvent} for the event structure.
+     * @see {@link Solution} for accessing variable values.
+     * @see {@link Solver.onObjectiveBound} for objective bound updates.
+     */
+    get onSolution() { return this.#onSolution; }
+    set onSolution(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onSolution while solve is running");
+        this.#onSolution = handler;
+    }
+    /**
+     * Callback for objective bound events from the solver.
+     *
+     * @remarks
+     * The callback is called when the solver improves the bound on the objective (lower bound for minimization, upper bound for maximization). The default is no callback.
+     *
+     * The callback receives one argument:
+     *
+     * - `event` ({@link ObjectiveBoundEntry}): An object with the following fields:
+     *    - `value` (`number`): The new bound value.
+     *    - `solveTime` (`number`): Time when the bound was proved (seconds since solve start).
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * // Synchronous callback
+     * solver.onObjectiveBound = (event) => console.log(`Bound: ${event.value}`);
+     *
+     * // Asynchronous callback
+     * solver.onObjectiveBound = async (event: CP.ObjectiveBoundEntry) => {
+     *   await updateDashboard(event.value);
+     * };
+     * ```
+     *
+     * @see {@link ObjectiveBoundEntry} for the event structure.
+     * @see {@link Solver.onSolution} for solution events with objective values.
+     */
+    get onObjectiveBound() { return this.#onObjectiveBound; }
+    set onObjectiveBound(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onObjectiveBound while solve is running");
+        this.#onObjectiveBound = handler;
+    }
+    /**
+     * Callback for solve completion event.
+     *
+     * @remarks
+     * The callback is called once when the solve completes, providing final statistics. The default is no callback.
+     *
+     * The callback receives one argument:
+     *
+     * - `summary` ({@link SolveSummary}): Solve statistics with properties including:
+     *    - `nbSolutions` (`number`): Number of solutions found.
+     *    - `duration` (`number`): Total solve time in seconds.
+     *    - `nbBranches` (`number`): Number of branches explored.
+     *    - `objective` (`number | undefined`): Best objective value, or `undefined` if no solution found.
+     *    - Plus many other statistics (see {@link SolveSummary}).
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * solver.onSummary = (summary: CP.SolveSummary) => {
+     *   console.log(`Solve completed: ${summary.nbSolutions} solutions`);
+     *   console.log(`Time: ${summary.duration.toFixed(2)}s`);
+     *   if (summary.objective !== undefined)
+     *     console.log(`Best objective: ${summary.objective}`);
+     * };
+     *
+     * // Asynchronous callback
+     * solver.onSummary = async (summary: CP.SolveSummary) => {
+     *   await saveStatsToDb(summary);
+     * };
+     * ```
+     *
+     * @see {@link SolveSummary} for the complete list of statistics.
+     */
+    get onSummary() { return this.#onSummary; }
+    set onSummary(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onSummary while solve is running");
+        this.#onSummary = handler;
+    }
+    /**
+     * Callback for log messages from the solver.
+     *
+     * @remarks
+     * The callback is called for each log message, after the message is written to the output stream (see {@link Parameters.printLog}). The default is no callback.
+     *
+     * The callback receives one argument:
+     *
+     * - `msg` (`string`): The log message text.
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * // Synchronous callback
+     * solver.onLog = (msg) => myLogger.info(msg);
+     *
+     * // Or with a named function
+     * solver.onLog = (msg: string) => {
+     *   console.log(`LOG: ${msg}`);
+     * };
+     *
+     * // Asynchronous callback
+     * solver.onLog = async (msg: string) => {
+     *   await asyncLogger.info(msg);
+     * };
+     * ```
+     *
+     * The amount of log messages and their periodicity can be controlled by {@link Parameters.logLevel} and {@link Parameters.logPeriod}.
+     *
+     * @see {@link Parameters.printLog} for redirecting output to a stream.
+     * @see {@link Solver.onWarning} for warning messages.
+     */
+    get onLog() { return this.#onLog; }
+    set onLog(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onLog while solve is running");
+        this.#onLog = handler;
+    }
+    /**
+     * Callback for warning messages from the solver.
+     *
+     * @remarks
+     * The callback is called for each warning message, after the message is written to the output stream (see {@link Parameters.printLog}). The default is no callback.
+     *
+     * The callback receives one argument:
+     *
+     * - `msg` (`string`): The warning message text.
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * // Synchronous callback
+     * solver.onWarning = (msg) => console.warn(msg);
+     *
+     * // Asynchronous callback
+     * solver.onWarning = async (msg: string) => {
+     *   await asyncLogger.warning(msg);
+     * };
+     * ```
+     *
+     * The amount of warning messages can be configured using {@link Parameters.warningLevel}.
+     *
+     * @see {@link Parameters.printLog} for redirecting output to a stream.
+     * @see {@link Solver.onLog} for log messages.
+     * @see {@link Solver.onError} for error messages.
+     */
+    get onWarning() { return this.#onWarning; }
+    set onWarning(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onWarning while solve is running");
+        this.#onWarning = handler;
+    }
+    /**
+     * Callback for error messages from the solver.
+     *
+     * @remarks
+     * The callback is called for each error message. The default is no callback.
+     *
+     * The callback receives one argument:
+     *
+     * - `msg` (`string`): The error message text.
+     *
+     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
+     *
+     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
+     *
+     * ```ts
+     * const solver = new CP.Solver();
+     *
+     * // Synchronous callback
+     * solver.onError = (msg) => console.error(`ERROR: ${msg}`);
+     *
+     * // Asynchronous callback
+     * solver.onError = async (msg: string) => {
+     *   await asyncLogger.error(msg);
+     * };
+     * ```
+     *
+     * An error message indicates that the solve is closing. However, other messages (log, warning, solution) may still arrive after the error.
+     *
+     * @see {@link Solver.onWarning} for warning messages.
+     * @see {@link Solver.onLog} for log messages.
+     */
+    get onError() { return this.#onError; }
+    set onError(handler) {
+        if (this.#solving)
+            throw new Error("Cannot change onError while solve is running");
+        this.#onError = handler;
+    }
+    // === Internal callbacks (for propagate/toText, persist across solves) ===
+    /** @internal */
+    _onStart;
+    /** @internal */
+    _onClose;
+    /** @internal */
+    _onDomains;
+    /** @internal */
+    _onTextModel;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    on(event, listener) {
+        const propertyMap = {
+            'solution': 'onSolution',
+            'objectiveBound': 'onObjectiveBound',
+            'lowerBound': 'onObjectiveBound', // deprecated alias
+            'summary': 'onSummary',
+            'log': 'onLog',
+            'warning': 'onWarning',
+            'error': 'onError',
+        };
+        const propName = propertyMap[event];
+        if (propName === undefined)
+            throw new Error(`Unknown event: '${event}'`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (this[propName] !== undefined)
+            throw new Error(`Callback for '${event}' is already set. Use callback properties instead.`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this[propName] = listener;
+        return this;
+    }
+    /**
+     * Find path to the `optalcp` binary.
+     *
+     * @param params (Optional) Parameters object that may contain the solver path or URL
+     *
+     * @returns The path to the solver executable or WebSocket URL
+     *
+     * @remarks
+     * This static method is used to find the solver for {@link Model.solve}.
+     * Usually, there's no need to call this method directly. However, it could be
+     * used to check what solver would be used.
+     *
+     * The method works as follows:
+     *
+     * - If `params.solver` is set, its value is returned (path or URL).
+     * - If the `OPTALCP_SOLVER` environment variable is set, then it is used.
+     *
+     * - If npm package `@scheduleopt/optalcp-bin` is installed then
+     *   it is searched for the `optalcp` executable.
+     * - If npm package `@scheduleopt/optalcp-bin-academic` is installed then
+     *   it is searched too.
+     * - If npm package `optalcp-bin-preview` is installed then
+     *   it is searched too.
+     *
+     * - Finally, if nothing from the above works, the method assumes that
+     *   `optalcp` is in the `PATH`.
+     *
+     * ```ts
+     * import * as cp from '@scheduleopt/optalcp';
+     *
+     * // Check what solver would be used
+     * const solver = cp.Solver.findSolver();
+     * console.log("Solver:", solver);
+     *
+     * // Or check with custom parameters
+     * const custom = cp.Solver.findSolver({ solver: '/custom/path/optalcp' });
+     * ```
+     *
+     * @see {@link Parameters.solver} to specify the solver.
+     *
+     * @group Solving
+     */
+    static findSolver(params = {}) {
+        // Returns resolved path if executable found, undefined otherwise.
+        // On Windows, also tries appending .exe if not already present.
+        const findExecutable = (path) => {
+            if (process.platform === "win32") {
+                if (fs.existsSync(path))
+                    return path;
+                if (!path.toLowerCase().endsWith(".exe") && fs.existsSync(path + ".exe"))
+                    return path + ".exe";
+                return undefined;
+            }
+            // On Unix, check execute permission
+            try {
+                fs.accessSync(path, fs.constants.X_OK);
+                return path;
+            }
+            catch {
+                return undefined;
+            }
+        };
+        // 1. Check params.solver first
+        if (params.solver !== undefined) {
+            if (isWebSocketUrl(params.solver))
+                return params.solver;
+            let resolved = findExecutable(params.solver);
+            if (resolved !== undefined)
+                return resolved;
+            throw new Error(`solver points to invalid executable: ${params.solver}`);
+        }
+        // 2. Check OPTALCP_SOLVER environment variable
+        const envSolver = process.env.OPTALCP_SOLVER;
+        if (envSolver !== undefined && envSolver !== "") {
+            let resolved = findExecutable(envSolver);
+            if (resolved !== undefined)
+                return resolved;
+            throw new Error(`OPTALCP_SOLVER points to invalid executable: ${envSolver}`);
+        }
+        // 3. Try optalcp-bin packages
+        let binaryName = process.platform === "win32" ? "optalcp.exe" : "optalcp";
+        let relPath = process.platform + "-" + process.arch + "/" + binaryName;
+        let result = getSolverPathFromPackage("@scheduleopt/optalcp-bin", relPath);
+        if (result !== undefined)
+            return result;
+        result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-academic", relPath);
+        if (result !== undefined)
+            return result;
+        result = getSolverPathFromPackage("@scheduleopt/optalcp-bin-preview", relPath);
+        if (result !== undefined)
+            return result;
+        // 4. Assume optalcp is in the PATH
+        return "optalcp";
+    }
+    /**
+     * Invoke a user callback (sync or async). Not awaited by callers (use `void`).
+     * Treating errors is tricky:
+     *  - If the callback is sync and throws, we catch it immeidiately.
+     *    (we can await a sync function, it just returns a resolved promise)
+     *  - If the callback is async and rejects, we catch it too (after await).
+     *  - In case or error, we call #handleError which rejects #closedPromise.
+     *  - So Model.solve (or other top-function) will get that error and finishes.
+     */
+    async #callCallback(callback, arg) {
+        if (callback === undefined)
+            return;
+        try {
+            await callback(arg);
+        }
+        catch (err) {
+            this.#handleError(err instanceof Error ? err : new Error(String(err)));
+        }
+    }
+    /**
+     * Handle a solver error message. Calls onError callback and stores for later.
+     * Accumulated errors are thrown at the end of solve (if another Error is not thrown first).
+     */
+    #handleSolverError(msg) {
+        this.#closeExpected = true;
+        void this.#callCallback(this.onError, msg);
+        this.#errorMessages.push(msg);
+    }
+    /**
+     * Handle a critical error (not error reported by the solver).
+     * Callback onError is called, however error it are ignored.
+     * */
+    #handleError(err) {
+        this.#closeExpected = true;
+        // Fire-and-forget onError callback with full error suppression.
+        // We can't just use `void this.onError?.(err.message)` because:
+        // - Sync throw would propagate up and crash the caller
+        // - Async rejection would cause "unhandled promise rejection" in Node.js
+        // Errors must be suppressed to prevent recursion (onError error -> #handleError -> onError...).
+        try {
+            const result = this.onError?.(err.message);
+            if (result instanceof Promise)
+                result.catch(() => { });
+        }
+        catch {
+            // Ignore
+        }
+        this.#closedReject(err);
+    }
+    /**
+     * Solves a model with the specified parameters.
+     *
+     * @param model The model to solve
+     * @param params (Optional) The parameters for the solver
+     * @param warmStart (Optional) An initial solution to start the solver with
+     *
+     * @returns The result of the solve when finished.
+     *
+     * @remarks
+     * The solving process runs asynchronously. Use `await` to wait for the
      * solver to finish.  During the solve, the solver emits events that can be
-     * intercepted (see {@link on}) to execute a code when the event occurs.
+     * intercepted using callback properties like {@link Solver.onSolution},
+     * {@link Solver.onLog}, etc.
      *
-     * Note that JavaScript is single-threaded.  Therefore, it cannot communicate
-     * with the solver subprocess while the user code runs.  The user code
-     * must be idle (using `await` or waiting for an event) for the solver to
-     * function correctly.
-     *
-     * Note that function {@link solve} cannot be called only once. If you need to
-     * solve multiple models or run multiple solves in parallel, then create multiple
-     * `Solver` objects.
+     * Communication with the solver subprocess happens through the event loop.
+     * The user code must yield control (using `await` or waiting for an event)
+     * for the solver to receive commands and send updates.
      *
      * ### Warm start and external solutions
      *
@@ -8060,242 +10539,221 @@ export class Solver extends EventEmitter {
      * improve the provided solution by Large Neighborhood Search.
      *
      * There are two ways to pass a solution to the solver: using `warmStart`
-     * parameter and using function {@link sendSolution}.
+     * parameter and using function {@link Solver.sendSolution}.
      * The difference is that `warmStart` is guaranteed to be used by the solver
      * before the solve starts.  On the other hand, `sendSolution` can be called
      * at any time during the solve.
      *
-     * Parameter {@link Parameters.LNSUseWarmStartOnly} controls whether the
+     * Parameter {@link Parameters.lnsUseWarmStartOnly} controls whether the
      * solver should only use the warm start solution (and not search for other
-     * initial solutions).
+     * initial solutions). If no warm start is provided, the solver searches for
+     * its own initial solution as usual.
      */
-    async solve(model, params, warmStart, log) {
-        if (this.#solver !== undefined)
-            throw Error("Function Solver.solve was called multiple times.");
-        await this._run("solve", model, params, warmStart, log);
-        if (this.#summary === undefined)
-            throw Error("Internal error: 'summary' event was not received");
-        return {
-            // For some reason, typescript doesn't see that `summary` event can
-            // overwrite `summary` variable.  It thinks that summary must be undefined.
-            // So the following "as SolveSummary" is needed:
-            ...this.#summary,
-            objectiveHistory: this.#objectiveHistory,
-            lowerBoundHistory: this.#lowerBoundHistory,
-            bestSolution: this.#bestSolution,
-            bestSolutionTime: this.#bestSolutionTime,
-            bestLBTime: this.#bestLBTime,
-            bestSolutionValid: this.#bestSolutionValid,
-        };
-        // TODO:1 `CP.solve` now returns a broken promise rather then returning a summary with `error: true`.
-        //        Therefore we actually don't need "close" event. In normal case the last event could be "summary",
-        //        in error case it should be "error".
-        //        It assumes changes in the solver itself. In particular, in case of error, the solver should
-        //        send "error" message and end immediately (so that the "error" message is the last one).
+    async solve(model, params, warmStart) {
+        if (this.#solving)
+            throw new Error("Solver is already running. Create a new Solver instance for concurrent solves.");
+        this.#solving = true;
+        try {
+            await this._run("solve", model, params, warmStart);
+            if (this.#summary === undefined)
+                throw Error("Internal error: 'summary' event was not received");
+            return {
+                // For some reason, typescript doesn't see that `summary` event can
+                // overwrite `summary` variable.  It thinks that summary must be undefined.
+                // So the following "as SolveSummary" is needed:
+                ...this.#summary,
+                objectiveHistory: this.#objectiveHistory,
+                solution: this.#solution,
+                solutionTime: this.#solutionTime,
+                boundTime: this.boundTime,
+                solutionValid: this.#solutionValid,
+                objectiveBoundHistory: this.objectiveBoundHistory,
+                // Deprecated fields (copies of the ones above):
+                bestSolution: this.#solution,
+                bestSolutionTime: this.#solutionTime,
+                bestLBTime: this.boundTime,
+                bestSolutionValid: this.#solutionValid,
+                lowerBoundHistory: this.objectiveBoundHistory,
+            };
+            // TODO:1 `CP.solve` now returns a broken promise rather then returning a summary with `error: true`.
+            //        Therefore we actually don't need "close" event. In normal case the last event could be "summary",
+            //        in error case it should be "error".
+            //        It assumes changes in the solver itself. In particular, in case of error, the solver should
+            //        send "error" message and end immediately (so that the "error" message is the last one).
+        }
+        finally {
+            this.#solving = false;
+            this._resetState();
+        }
     }
     /** @internal */
-    async _run(command, model, params, warmStart, log) {
-        if (this.#solver !== undefined)
-            throw Error("Attempt to use Solver multiple times.");
-        if (log !== undefined)
-            this.redirectOutput(log);
+    async _run(command, model, params, warmStart) {
         if (params === undefined)
             params = {};
-        let errContext = "Error while starting solver: ";
+        // Initialize promises for start/close synchronization
+        this.#startPromise = new Promise(resolve => { this.#startResolve = resolve; });
+        this.#closedPromise = new Promise((resolve, reject) => {
+            this.#closedResolve = resolve;
+            this.#closedReject = reject;
+        });
+        // Configure output based on params.printLog
+        const log = params.printLog;
+        if (log === false) {
+            this.#outputStream = null;
+            this.#hasColors = false;
+        }
+        else if (log === true || log === undefined) {
+            this.#outputStream = process.stdout;
+            this.#hasColors = process.stdout.isTTY ?? false;
+        }
+        else {
+            this.#outputStream = log;
+            this.#hasColors = log.isTTY ?? false;
+        }
+        // Set up connection handlers
+        const handlers = {
+            onMessage: (line) => this.#processMessage(line),
+            onClose: () => {
+                if (!this.#closeExpected)
+                    this.#handleError(new Error('Solver connection closed unexpectedly.'));
+                // Defer to allow error handlers to process first
+                queueMicrotask(() => {
+                    this._onClose?.();
+                    this.#closedResolve();
+                    this._resetProcessState();
+                });
+            },
+            onError: (err) => this.#handleError(err),
+            onWarning: (msg) => {
+                void this.#callCallback(this.onWarning, msg);
+                if (this.#outputStream !== null)
+                    this.#outputStream.write(msg + '\n');
+            }
+        };
         try {
-            // Start the subprocess.
-            this.#solver = spawn(calcSolverPath(params), { windowsHide: true });
-            // Channel error messages to the user (e.g. fails to spawn the process):
-            this.#solver.on('error', (err) => {
-                err.message = "Error with solver subprocess: " + err.message;
-                this.emit('error', err);
-                this.#closeExpected = true;
-            });
-            // Emit an error if solver exits unexpectedly.
-            this.#solver.on('close', (code, signal) => {
-                if (code === 0) {
-                    if (!this.#closeExpected)
-                        this.emit('error', Error('Error: Solver has ended unexpectedly with code ' + code + '.'));
-                }
-                else if (code !== null)
-                    this.emit('error', Error('Error: Solver process has ended with code ' + code + '.'));
-                else {
-                    assert(signal !== null);
-                    this.emit('error', Error('Error: Solver process has ended by signal ' + signal + '.'));
-                }
-                this.#solverClosed = true;
-                if (this.#rlClosed)
-                    this.emit('close');
-                this.#closeExpected = true;
-            });
-            // Emit an error if there's a problem on stdin or stdout:
-            this.#solver.stdin.on('error', (err) => {
-                if (err.message === "write EPIPE") {
-                    // Ignore. It is hard to avoid since writes are buffered.
-                    // It could happen in particular when user calls sendSolution and the solver dies in the middle of the message.
-                    return;
-                }
-                err.message = "Error at solver stdin: " + err.message;
-                this.emit('error', err);
-                this.#closeExpected = true;
-            });
-            this.#solver.stdout.on('error', (err) => {
-                err.message = "Error at solver stdout: " + err.message;
-                this.emit('error', err);
-                this.#closeExpected = true;
-            });
-            this.#solver.stderr.on('data', (data) => {
-                // Messages on stderr typically arrive in multiple chunks.
-                // If we raise an error on the first chunk, then we may not see the
-                // complete error message.
-                // Display everything until the last newline. The part after the last
-                // new line stays buffered for the next chunk.
-                this.#errStreamBuffer += data.toString();
-                let lastNewline = this.#errStreamBuffer.lastIndexOf('\n');
-                if (lastNewline >= 0) {
-                    // We have a complete message in the buffer.
-                    let completeMessage = this.#errStreamBuffer.substring(0, lastNewline + 1);
-                    this.#errStreamBuffer = this.#errStreamBuffer.substring(lastNewline + 1);
-                    // Emit the complete message as a warning.
-                    this.emit('warning', 'Solver writes on error stream:\n' + completeMessage + '\n');
-                    if (this.#outputStream !== null) {
-                        // Prefix every line:
-                        let prefixed = completeMessage.split('\n').map(line => "Solver stderr: " + line + '\n').join('');
-                        this.#outputStream.write(prefixed);
-                    }
-                }
-                // Do not set #closeExpected to true here. We want to continue
-                // reading and raise an error only once the solver dies.
-            });
-            // We don't react on close event on this.#solver.stdin because it may
-            // arrive sooner that summary event. Instead we raise an error if we
-            // attempt to write to stdin and it is not writable.
-            // Create readline interface on solver stdout so that we can easily read its
-            // output line by line. Every line should be a separate JSON message.
-            errContext = "Error establishing interface with solver: ";
-            this.#rlStdout = readline.createInterface({
-                input: this.#solver.stdout,
-                crlfDelay: Infinity
-            });
-            this.#rlClosed = false;
-            this.#rlStdout.on('close', () => {
-                this.#rlClosed = true;
-                if (!this.#closeExpected) {
-                    this.emit('error', Error('Error: Solver stdout was closed unexpectedly.'));
-                    this.#closeExpected = true;
-                }
-                if (this.#solverClosed)
-                    this.emit('close');
-            });
-            // Send initial handshake message
-            errContext = "Error sending handshake message to the solver: ";
-            this.#sendMessage({ msg: "handshake", client: "OptalCP Nodejs extension", version: Version, colors: this.#hasColors });
-            // Wait for handshake message from the server and parse it. If the line
-            // never comes then the rest of this code is never executed (and so there
-            // is no need and even no way to check for an error here).
-            errContext = "Handshake error: ";
-            const [serverHandshakeLine] = await once(this.#rlStdout, 'line');
-            const serverHandshake = JSON.parse(serverHandshakeLine); // throws SyntaxError that has a field message
-            if (typeof serverHandshake !== 'object')
-                throw Error("Invalid handshake message from the server.");
-            if (serverHandshake.msg === "error")
-                throw Error(serverHandshake.data);
-            if (serverHandshake.msg !== 'handshake')
-                throw Error("Unknown server handshake message.");
-            // Wait on line events because we may already receive some errors from the server.
-            this.#rlStdout.on('line', (line) => {
-                try {
-                    const msg = JSON.parse(line);
-                    if (typeof msg != 'object' || msg.msg === undefined)
-                        throw Error("Error: Not a message.");
-                    switch (msg.msg) {
-                        case 'error':
-                            this.emit('error', Error("Error from the server: " + msg.data));
-                            break;
-                        case 'log':
-                            if (this.#outputStream !== null)
-                                this.#outputStream.write(msg.data);
-                            this.emit('log', msg.data);
-                            break;
-                        case 'trace':
-                            if (this.#outputStream !== null)
-                                this.#outputStream.write(msg.data);
-                            this.emit('trace', msg.data);
-                            break;
-                        case 'warning':
-                            this.emit('warning', msg.data);
-                            // msg.prefix contains possibly colored prefix "Warning: ".
-                            this.#outputStream?.write(msg.prefix + msg.data);
-                            break;
-                        case 'solution':
-                            let solution = new Solution;
-                            solution._init(msg.data);
-                            this.#bestSolution = solution;
-                            this.#bestSolutionTime = msg.data.solveTime;
-                            this.#bestSolutionValid = msg.data.verifiedOK;
-                            this.#objectiveHistory.push({
-                                solveTime: msg.data.solveTime,
-                                objective: solution.getObjective(),
-                                valid: msg.data.verifiedOK
-                            });
-                            this.emit('solution', { solveTime: msg.data.solveTime, valid: msg.data.verifiedOK, solution: solution });
-                            break;
-                        case 'domains':
-                            // Event 'domains' is sent after propagate(). After this event the solver exits automatically:
-                            // TODO:1 Make sure that solver never sends domains event with error=true.
-                            if (!msg.data.error)
-                                this.emit('domains', msg.data);
-                            this.#closeExpected = true;
-                            break;
-                        case 'lowerBound':
-                            this.#lowerBoundHistory.push(msg.data);
-                            this.#bestLBTime = msg.data.solveTime;
-                            this.emit('lowerBound', msg.data);
-                            break;
-                        case 'textModel':
-                            this.emit('textModel', msg.data);
-                            this.#closeExpected = true;
-                            break;
-                        case 'summary':
-                            this.#closeExpected = true;
-                            this.#summary = msg.data;
-                            // TODO:1 Change server so that it doesn't send summary if there was an error.
-                            if (!msg.data.error)
-                                this.emit('summary', msg.data);
-                            break;
-                        default:
-                            this.#closeExpected = true;
-                            this.emit('error', Error("Unknown server message type '" + msg.msg + "'."));
-                    }
-                }
-                catch (err) {
-                    this.#closeExpected = true;
-                    if (err instanceof Error) {
-                        err.message = "Error parsing data from the server: " + err.message;
-                        this.emit('error', err);
-                    }
-                    else
-                        this.emit('error', Error("Unknown exception while reading from the server."));
-                }
-            });
-            // Function write may throw an exception if the stream is already closed:
-            errContext = "Error while sending the model: ";
-            // Send the model to the server:
-            this.#solver.stdin.write(model._serialize(command, params, warmStart) + '\n');
-            errContext = ""; // Should not be needed any more
+            // Create connection based on platform and parameters
+            const solver = Solver.findSolver(params);
+            if (isWebSocketUrl(solver)) {
+                this.#connection = new WebSocketSolverConnection(solver, handlers);
+            }
+            else {
+                this.#connection = new NodeSolverConnection(solver, params?.solverArgs ?? [], handlers);
+            }
+            // Send handshake and model. Server processes them in order.
+            // Handshake response is validated in #processMessage.
+            this.#connection.send(JSON.stringify({ msg: "handshake", client: "OptalCP extension", version: Version, colors: this.#hasColors }));
+            // Defer solution values if no onSolution callback is set (optimization for large models)
+            const deferSolution = command === "solve" && this.#onSolution === undefined;
+            this.#connection.send(model._serialize(command, params, warmStart, deferSolution));
             this.#initialized = true;
-            this.emit('start');
+            this._onStart?.();
+            this.#startResolve();
         }
         catch (err) {
-            this.#closeExpected = true;
-            if (err instanceof Error) {
-                err.message = errContext + err.message;
-                this.emit('error', err);
-            }
-            else
-                this.emit('error', Error(errContext + "Unknown exception."));
+            const error = err instanceof Error ? err : new Error("Unknown exception while starting solver.");
+            this.#handleError(error);
         }
         await this.#runLoop();
+    }
+    /**
+     * Process a message line from the solver.
+     * The first message must be the handshake response.
+     * @internal
+     */
+    #processMessage(line) {
+        try {
+            const msg = JSON.parse(line);
+            if (typeof msg !== 'object' || msg.msg === undefined)
+                throw Error("Error: Not a message.");
+            // First message must be handshake response
+            if (!this.#handshakeReceived) {
+                if (msg.msg === 'error')
+                    throw Error(msg.data);
+                if (msg.msg !== 'handshake')
+                    throw Error("Expected handshake message, got '" + msg.msg + "'.");
+                this.#handshakeReceived = true;
+                return;
+            }
+            switch (msg.msg) {
+                case 'error':
+                    if (this.#outputStream !== null)
+                        this.#outputStream?.write(msg.prefix + msg.data);
+                    this.#handleSolverError(msg.data);
+                    break;
+                case 'log':
+                    if (this.#outputStream !== null)
+                        this.#outputStream.write(msg.data);
+                    void this.#callCallback(this.onLog, msg.data);
+                    break;
+                case 'warning':
+                    void this.#callCallback(this.onWarning, msg.data);
+                    if (this.#outputStream !== null) {
+                        // msg.prefix contains possibly colored prefix "Warning: ".
+                        this.#outputStream?.write(msg.prefix + msg.data);
+                    }
+                    break;
+                case 'solution':
+                    // Always track metadata first (applies to both normal and deferred modes)
+                    this.#solutionTime = msg.data.solveTime;
+                    this.#solutionValid = msg.data.verifiedOK;
+                    this.#objectiveHistory.push({
+                        solveTime: msg.data.solveTime,
+                        objective: msg.data.objective,
+                        valid: msg.data.verifiedOK
+                    });
+                    // When deferSolution=true, values are omitted - Solution will come in summary
+                    if (msg.data.values !== undefined) {
+                        const solution = new Solution;
+                        solution._init(msg.data);
+                        this.#solution = solution;
+                        void this.#callCallback(this.onSolution, { solveTime: msg.data.solveTime, valid: msg.data.verifiedOK, solution: solution });
+                    }
+                    break;
+                case 'domains':
+                    // Event 'domains' is sent after propagate(). After this event the solver exits automatically:
+                    // TODO:1 Make sure that solver never sends domains event with error=true.
+                    this.#closeExpected = true;
+                    if (!msg.data.error)
+                        this._onDomains?.(msg.data);
+                    break;
+                case 'lowerBound':
+                    this.objectiveBoundHistory.push(msg.data);
+                    this.boundTime = msg.data.solveTime;
+                    void this.#callCallback(this.onObjectiveBound, msg.data);
+                    break;
+                case 'textModel':
+                    this.#closeExpected = true;
+                    this._onTextModel?.(msg.data);
+                    break;
+                case 'summary':
+                    this.#closeExpected = true;
+                    this.#summary = {
+                        ...msg.data,
+                        actualWorkers: msg.data.nbWorkers,
+                        objectiveBound: msg.data.lowerBound
+                    };
+                    // Handle deferred solution values (when deferSolution was true)
+                    if (msg.data.solutionValues !== undefined) {
+                        if (this.#solution === undefined)
+                            this.#solution = new Solution();
+                        this.#solution._init({
+                            values: msg.data.solutionValues,
+                            objective: msg.data.objective
+                        });
+                    }
+                    if (!msg.data.error)
+                        void this.#callCallback(this.onSummary, this.#summary);
+                    break;
+                default:
+                    this.#handleError(new Error("Unknown server message type '" + msg.msg + "'."));
+            }
+        }
+        catch (err) {
+            const error = err instanceof Error
+                ? new Error("Error parsing data from the server: " + err.message)
+                : new Error("Unknown exception while reading from the server.");
+            this.#handleError(error);
+        }
     }
     // Handles communication with the server until its end. Returns false in case of an error.
     /** @internal */
@@ -8304,7 +10762,7 @@ export class Solver extends EventEmitter {
         // group. I.e. it is sent to the solver too. However on windows we have to
         // inform the solver manually.
         const ctrlCHandler = () => {
-            this.stop("Ctrl-C");
+            void this.stop("Interrupted");
             process.removeListener('SIGINT', ctrlCHandler);
         };
         if (process.platform === "win32") {
@@ -8319,32 +10777,35 @@ export class Solver extends EventEmitter {
         }
         if (this.#outputStream !== null)
             this.#outputStream.on('error', this.#outputStreamErrorCallback);
-        let hadError = false;
         try {
-            // The following can throw in (because of rejected promise).
-            // We want the exception to bubble up, but in any case we need to
-            // remove ctrl-c handler (in case of windows).
-            await once(this, 'close');
+            await this.#closedPromise;
         }
         finally {
+            // Ensure subprocess is killed if we exit early (e.g., due to error)
+            try {
+                this.#connection?.close();
+            }
+            catch {
+                // Ignore errors when closing
+            }
             if (process.platform === "win32")
                 process.removeListener('SIGINT', ctrlCHandler);
             if (this.#outputStream !== null)
                 this.#outputStream.off('error', this.#outputStreamErrorCallback);
         }
+        if (this.#errorMessages.length > 0)
+            throw new Error(this.#errorMessages.join('\n'));
     }
     /**
-     * Instruct the solver to stop ASAP.
+     * Requests the solver to stop as soon as possible.
      *
-     * @param reason The reason why to stop. The reason will appear in the log.
+     * @param reason The reason why to stop. The reason will appear in the log
      *
      * @remarks
-     *
-     * A stop message is sent to the server asynchronously. The server will
-     * stop as soon as possible and will send a summary event and close event.
-     * However, due to the asynchronous nature of the communication,
-     * other events may be sent before the summary event (e.g., another solution
-     * found or a log message).
+     * This method only initiates the stop; it returns immediately without waiting
+     * for the solver to actually stop. The solver will stop as soon as possible and
+     * will send a summary event. However, other events may be sent
+     * before the summary event (e.g., another solution found or a log message).
      *
      * Requesting a stop on a solver that has already stopped has no effect.
      *
@@ -8368,22 +10829,20 @@ export class Solver extends EventEmitter {
      * });
      * let result = await solver.solve(model, { timeLimit: 300 });
      * ```
-     *
      */
     async stop(reason) {
         if (!this.#initialized)
-            await once(this, 'start');
-        if (this.#closeExpected || !this.#solver.stdin.writable)
+            await this.#startPromise;
+        if (this.#closeExpected || !this.#connection)
             return;
         this.#sendMessage({ msg: "stop", reason: reason });
     }
     /**
      * Send an external solution to the solver.
      *
-     * @param solution The solution to send. It must be compatible with the model; otherwise, an error is raised.
+     * @param solution The solution to send. It must be compatible with the model; otherwise, an error is raised
      *
      * @remarks
-     *
      * This function can be used to send an external solution to the solver, e.g.
      * found by another solver, a heuristic, or a user.  The solver will take
      * advantage of the solution to speed up the search: it will search only for
@@ -8403,50 +10862,13 @@ export class Solver extends EventEmitter {
      */
     async sendSolution(solution) {
         if (!this.#initialized)
-            await once(this, 'start');
-        if (this.#closeExpected || !this.#solver.stdin.writable)
+            await this.#startPromise;
+        if (this.#closeExpected || !this.#connection)
             return; // The solver has already stopped.
         // Message is sent asynchronously. Solver may die in the middle of the
         // message.  So the documentation is correct about ignoring solutions
         // sent about the time the solver has stopped.
         this.#sendMessage({ msg: "solution", data: solution._serialize() });
-    }
-    /**
-     * Redirects log, trace, and warnings to the given stream. Or suppresses them when
-     * `stream` is `null`.
-     *
-     * @param stream The stream to write the output into, or `null` to suppress the output.
-     * @returns The Solver itself for chaining.
-     *
-     * Normally, Solver writes log, trace, and warning messages to its standard
-     * output. This function allows to redirect those messages to another stream
-     * (e.g., a file) or suppress them entirely.
-     *
-     * Note that besides writing the messages to the standard output, the solver
-     * also emits events for log, trace, and warning messages. Those events can be
-     * intercepted using functions {@link on}.
-     *
-     * If the output stream becomes non-writable (e.g., a broken pipe), then the solver
-     * stops as soon as possible (function {@link stop} is called).
-     *
-     * @example
-     *
-     * In the following example, we store all the solver text output in a file
-     * named `log.txt`.
-     *
-     * ```ts
-     * import * as fs from 'fs';
-     * import * as CP from '@scheduleopt/optalcp';
-     *
-     * ...
-     * let solver = new CP.Solver;
-     * solver.redirectOutput(fs.createWriteStream('log.txt'));
-     * ```
-     */
-    redirectOutput(stream) {
-        this.#outputStream = stream;
-        this.#hasColors = stream === process.stdout && process.stdout.isTTY;
-        return this;
     }
     /**
      * @internal
@@ -8462,177 +10884,96 @@ export class Solver extends EventEmitter {
      * further commands, particularly {@link stop} or {@link sendSolution}.
      */
     _hasFinished() {
-        return this.#initialized && (this.#closeExpected || !this.#solver.stdin.writable);
+        return this.#initialized && (this.#closeExpected || !this.#connection);
     }
     #sendMessage(msg) {
-        // The function `write` does not wait; it writes into the internal buffer, which
-        // is fed into the solver process asynchronously.
-        if (this.#solver.stdin.writable)
-            this.#solver.stdin.write(JSON.stringify(msg) + '\n');
-        else {
-            this.emit('error', "Unable to write to the solver stdin.");
-            this.#closeExpected = true;
-        }
+        if (this.#connection)
+            this.#connection.send(JSON.stringify(msg));
+        else
+            this.#handleError(new Error("Unable to write to the solver: not connected."));
+    }
+    /**
+     * Resets process state fields after solver connection closes.
+     * Called automatically when the connection is closed.
+     * @internal
+     */
+    _resetProcessState() {
+        this.#connection = undefined;
+        this.#closeExpected = false;
+        this.#initialized = false;
+        this.#handshakeReceived = false;
+    }
+    /**
+     * Resets process and result state fields to allow Solver reuse.
+     * @internal
+     */
+    _resetState() {
+        this._resetProcessState();
+        this.#summary = undefined;
+        this.#objectiveHistory = [];
+        this.objectiveBoundHistory = [];
+        this.#solution = undefined;
+        this.#solutionTime = undefined;
+        this.boundTime = undefined;
+        this.#solutionValid = undefined;
+        this.#errorMessages = [];
     }
 }
-/**
- * Solve the provided model and return the result.
- *
- * @param model The model to solve.
- * @param params The parameters to use for solving.
- * @param warmStart The solution to start with.
- * @param log The stream to which the solver output (log, trace, and warnings)
- *            should be redirected. When undefined, then the output is printed
- *            on standard output. When null, then the output is suppressed.
- * @returns The result of the solve.
- *
- * @remarks
- *
- * This function is asynchronous and returns a promise. Use, e.g., `await` to wait
- * for the result.  When an error occurs, then the returned promise is rejected,
- * and the standard `Error` object is returned.
- *
- * If the `warmStart` parameter is specified, the solver will start with the
- * given solution.  The solution must be compatible with the model; otherwise,
- * an error will be raised.  The solver will take advantage of the
- * solution to speed up the search: it will search only for better solutions
- * (if it is a minimization or maximization problem). The solver may also try to
- * improve the provided solution by Large Neighborhood Search.
- *
- * To communicate asynchronously with the solver, use class {@link Solver}
- * instead.  E.g., to process every solution found or to send external solutions
- * to the solver
- *
- * For an example of using this function, see {@link Model}.
- *
- * @group Solving
- */
+/** @deprecated Use `Model.solve` instead. */
 export async function solve(model, params, warmStart, log) {
-    let solver = new Solver();
-    if (log !== undefined)
-        solver.redirectOutput(log);
-    return solver.solve(model, params, warmStart);
+    let printLog;
+    if (log === undefined)
+        printLog = process.stdout;
+    else if (log === null)
+        printLog = false;
+    else
+        printLog = log;
+    return new Solver().solve(model, { ...params, printLog }, warmStart);
 }
-/**
- * Translates a problem definition into a JSON format.
- *
- * @param problem The problem to export.
- * @returns A string containing the problem in JSON format.
- *
- * @remarks
- *
- * The result can be stored in a file,
- * for example.  The problem can be converted back from JSON format into an instance
- * of {@link ProblemDefinition} using function {@link json2problem}.
- *
- * @group Model exporting
- */
+/** @deprecated Use `Model.toJSON` instead. */
 export function problem2json(problem) {
-    return JSON.stringify(problem.model._toObject(problem.parameters, problem.warmStart));
+    return problem.model.toJSON(problem.parameters, problem.warmStart);
 }
-/**
- * Converts a problem from JSON format into an instance of {@link ProblemDefinition}.
- *
- * @param json A string containing the problem in JSON format.
- * @returns An instance of {@link ProblemDefinition} corresponding to the model in JSON format.
- *
- * @remarks
- * It is assumed that the problem was exported using function {@link problem2json}.
- *
- * Variables in the new model can be accessed using function {@link
- * Model.getIntervalVars | Model.getIntervalVars}.
- *
- * @group Model exporting
- */
+/** @deprecated Use `Model.fromJSON` instead. */
 export function json2problem(json) {
-    let data = JSON.parse(json);
-    let model = new Model;
-    model._fromObject(data);
-    let params = paramsFromJSON(data.parameters);
-    let warmStart = undefined;
-    if (data.warmStart !== undefined) {
-        warmStart = new Solution;
-        warmStart._init(data.warmStart);
-    }
-    return { model: model, parameters: params, warmStart: warmStart };
+    return Model.fromJSON(json);
 }
 /** @internal */
-export async function _toText(model, cmd, params, warmStart, log = process.stdout) {
+export async function _toText(model, cmd, params, warmStart) {
     let solver = new Solver;
-    let result = undefined;
-    solver.on('textModel', (msg) => { result = msg; });
-    await solver._run(cmd, model, params, warmStart, log);
-    if (result === undefined)
-        throw Error("Internal error: 'textModel' event was not received");
-    return result;
+    try {
+        let result = undefined;
+        solver._onTextModel = (msg) => { result = msg; };
+        await solver._run(cmd, model, params, warmStart);
+        if (result === undefined)
+            throw Error("Internal error: 'textModel' event was not received");
+        return result;
+    }
+    finally {
+        solver._resetState();
+    }
 }
-/**
- * Converts a problem into a text format similar to the IBM CP Optimizer file format.
- * The result is human-readable and can be stored in a file.
- *
- * @param model The model to be exported.
- * @param params The parameters to pass to the solver (they are mostly unused).
- * @param warmStart An initial solution to start the solver with.
- * @param log The stream to which the solver output should be redirected.
- *            When `undefined`, the output is printed to the standard output.
- *            When `null`, the output is suppressed.
- * @returns A string containing the model in text format.
- *
- * @remarks
- * Unlike JSON format, there is no way to convert the text format back into an
- * instance of {@link Model}.
- *
- * The result is so similar to the file format used by IBM CP Optimizer that, under
- * some circumstances, the result can be used as an input file for CP Optimizer.
- * However, some differences between OptalCP and CP Optimizer make
- * it impossible to make sure the result is always valid for CP Optimizer.
- * Known issues are:
- *
- * * OptalCP supports optional integer expressions, while CP Optimizer does not.
- *   If the model contains optional integer expressions, the result will not be
- *   valid for CP Optimizer or badly interpreted.  For example, in
- *   order to get a valid CP Optimizer file, don't use function {@link
- *   IntervalVar.start}, use {@link IntervalVar.startOr} instead.
- * * For the same reason, prefer precedence constraints such as
- *   {@link Model.endBeforeStart} over `constraint(x.end().le(y.start()))`.
- * * Negative heights in cumulative expressions (e.g., in {@link
- *   Model.stepAtStart}) are not supported by CP Optimizer.
- *
- * The function uses OptalCP solver for the conversion. Therefore, it is
- * asynchronous. To wait for the result, use the `await` keyword.
- *
- * In case of an error, this function returns a rejected promise.
- *
- * @group Model exporting
- */
+/** @deprecated Use `Model.toText` instead. */
 export async function problem2txt(model, params, warmStart, log) {
-    return _toText(model, "toText", params, warmStart, log);
+    let printLog;
+    if (log === undefined)
+        printLog = process.stdout;
+    else if (log === null)
+        printLog = false;
+    else
+        printLog = log;
+    return model.toText({ ...params, printLog }, warmStart);
 }
-/**
- * Converts a problem into equivalent JavaScript code. The result is human-readable.
- *
- * @param model The model to be exported.
- * @param params The parameters to pass to the solver (they are included in the generated code).
- * @param warmStart An initial solution to start the solver with.
- * @param log The stream to which the solver output should be redirected.
- *            When `undefined`, the output is printed to the standard output.
- *            When `null`, the output is suppressed.
- * @returns A string containing the model in JavaScript format.
- *
- * @remarks
- * This function is experimental, and the result is not guaranteed to be valid.
- *
- * The result of this function can be stored in a file and executed using
- * Node.js.  It is meant as a way to export a model to a format that is
- * executable, human-readable, editable, and independent of other libraries.
- *
- * In case of an error, this function returns a rejected promise.
- *
- * @group Model exporting
- * @experimental
- */
+/** @deprecated Use `Model.toJS` instead. */
 export async function problem2js(model, params, warmStart, log) {
-    return _toText(model, "toJS", params, warmStart, log);
+    let printLog;
+    if (log === undefined)
+        printLog = process.stdout;
+    else if (log === null)
+        printLog = false;
+    else
+        printLog = log;
+    return model.toJS({ ...params, printLog }, warmStart);
 }
 /**
  * @internal
@@ -8641,9 +10982,6 @@ export async function problem2js(model, params, warmStart, log) {
  *
  * @param model The model to propagate.
  * @param parameters The parameters to use for propagation.
- * @param log The stream to which the solver output should be redirected. When
- *            `undefined`, then the output is printed to the standard output.
- *            When `null`, the output is suppressed.
  * @returns The result of propagation.
  *
  * @remarks
@@ -8692,7 +11030,7 @@ export async function problem2js(model, params, warmStart, log) {
  *   // makes sure that exactly one of the two workers executes the task:
  *   model.alternative(tasks[i], [tasksWorker1[i], tasksWorker2[i]]);
  *   // All tasks must be finished before the time 19:
- *   model.constraint(model.le(tasks[i].end(), 19));
+ *   model.enforce(model.le(tasks[i].end(), 19));
  * }
  *
  * // Tasks of each worker cannot overlap:
@@ -8777,31 +11115,36 @@ export async function problem2js(model, params, warmStart, log) {
  *
  * @group Propagation
  */
-export async function propagate(model, parameters, log) {
+export async function propagate(model, parameters) {
     let solver = new Solver;
-    let result = undefined;
-    solver.on('domains', (msg) => {
-        // TODO:1 Change solver so that it never sends domains message with an error.
-        if (!msg.error) {
-            let domains = "infeasible";
-            if (msg.domains !== null)
-                domains = new ModelDomains(msg.domains);
-            else if (msg.limitHit)
-                domains = "limit";
-            result = {
-                duration: msg.duration,
-                memoryUsed: msg.memoryUsed,
-                nbIntVars: msg.nbIntVars,
-                nbIntervalVars: msg.nbIntervalVars,
-                nbConstraints: msg.nbConstraints,
-                domains: domains
-            };
-        }
-    });
-    await solver._run('propagate', model, parameters, undefined, log);
-    if (result === undefined)
-        throw new Error("Internal error in propagate: domains message not received");
-    return result;
+    try {
+        let result = undefined;
+        solver._onDomains = (msg) => {
+            // TODO:1 Change solver so that it never sends domains message with an error.
+            if (!msg.error) {
+                let domains = "infeasible";
+                if (msg.domains !== null)
+                    domains = new ModelDomains(msg.domains);
+                else if (msg.limitHit)
+                    domains = "limit";
+                result = {
+                    duration: msg.duration,
+                    memoryUsed: msg.memoryUsed,
+                    nbIntVars: msg.nbIntVars,
+                    nbIntervalVars: msg.nbIntervalVars,
+                    nbConstraints: msg.nbConstraints,
+                    domains: domains
+                };
+            }
+        };
+        await solver._run('propagate', model, parameters, undefined);
+        if (result === undefined)
+            throw new Error("Internal error in propagate: domains message not received");
+        return result;
+    }
+    finally {
+        solver._resetState();
+    }
 }
 // === StatsHolder ===========================================================
 /**
@@ -8828,7 +11171,7 @@ class StatsHolder {
             this.nbTimesNull++;
     }
     getAverage() {
-        if (this.size == 0)
+        if (this.size === 0)
             return 0;
         return this.sum / this.size;
     }
@@ -8857,17 +11200,17 @@ function parseBenchParameters(params, args) {
                 i++;
                 continue;
             }
-            if (lower == "--dontsolve") {
+            if (lower === "--dontsolve") {
                 params.solve = false;
                 i++;
                 continue;
             }
-            if (lower == "--dontoutputsolutions") {
+            if (lower === "--dontoutputsolutions") {
                 params.dontOutputSolutions = true;
                 i++;
                 continue;
             }
-            if (i == args.length - 1)
+            if (i === args.length - 1)
                 throw Error("Missing argument for command line option " + args[i] + ".");
             switch (lower) {
                 case "--nbseeds":
@@ -8895,7 +11238,7 @@ function parseBenchParameters(params, args) {
                     params.exportJS = args[i + 1];
                     break;
                 case "--exporttxt":
-                    params.exportTxt = args[i + 1];
+                    params.exportText = args[i + 1];
                     break;
                 case "--exportdomains":
                     params.exportDomains = args[i + 1];
@@ -8924,8 +11267,7 @@ function parseBenchParameters(params, args) {
 /** @internal
  * Note that the following parameter is not documented. It is functional only for internal builds:
   "  --exportDomains fileNamePattern  Export domains after the propagate into a text file\n" +
- *
-*/
+ */
 export const BenchmarkParametersHelp = 
 // There is undocumented --exportJS parameter
 "Benchmarking options:\n" +
@@ -8944,7 +11286,7 @@ export const BenchmarkParametersHelp =
     "  --result fileNamePattern         Write a detailed result into a JSON file\n" +
     "  --log fileNamePattern            Write log into the specified text file\n" +
     "  --exportJSON fileNamePattern     Export problem into a JSON file\n" +
-    "  --exportTxt fileNamePattern      Export problem into a text file\n" +
+    "  --exportText fileNamePattern      Export problem into a text file\n" +
     "Where fileNamePattern undergoes the following expansion:\n" +
     "  {name}       ->  Model name (by convention name of the source data file)\n" +
     "  {flat_name}  ->  Like {name} but all characters '/' is replaced by '_'\n" +
@@ -8954,16 +11296,10 @@ export const BenchmarkParametersHelp =
 /**
  * Parse benchmark parameters from command line arguments.
  *
- * @group Benchmarking
- *
- * @param params Input/output argument. Contains default values of parameters
- *               that will be overridden by command line arguments.
- *               When not specified, empty object `{}` is used.
- * @param args   Command line arguments to parse. When not specified,
- *               `process.argv.slice(2)` is used.
+ * @param params (Optional) Input/output argument containing default values of parameters that will be overridden by command line arguments. When not specified, empty object is used
+ * @param args (Optional) Command line arguments to parse. When not specified, process.argv.slice(2) is used
  *
  * @remarks
- *
  * This function parses command line arguments. In case of an error,
  * it prints an error message and terminates the program. The default
  * parameters can be specified using the parameter `params`.
@@ -9003,7 +11339,7 @@ export const BenchmarkParametersHelp =
  *
  * Major options:
  *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSLB|SetTimes
+ *   --searchType LNS|FDS|FDSDual|SetTimes
  *                                    Type of search to use
  *   --randomSeed uint32              Random seed
  *   --logLevel uint32                Level of the log
@@ -9016,17 +11352,20 @@ export const BenchmarkParametersHelp =
  *
  * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
  *
- *  * `--workerN.` or `--workersN.` for worker `N`
- *  * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
+ * * `--workerN.` or `--workersN.` for worker `N`
+ * * `--workerN-M.` or `--workersN-M.` for workers in the range `N` to `M`
  *
  * For example:
  *
  * * `--worker0.searchType FDS` sets the search type to the first worker only.
  * * `--workers4-8.noOverlapPropagationLevel 4` sets the propagation level of `noOverlap` constraint for workers 4, 5, 6, 7, and 8.
  *
+ * parsing only solver parameters.
+ *
  * @see {@link parseSomeBenchmarkParameters} for a version that allows unrecognized arguments.
- * @see Functions {@link parseParameters} and {@link parseSomeParameters} for
- *     parsing only solver parameters.
+ * @see Functions {@link parseParameters} and {@link parseSomeParameters} for only solver parameters.
+ *
+ * @group Benchmarking
  */
 export function parseBenchmarkParameters(params = {}, args = process.argv.slice(2)) {
     // Print help if there is -h or --help:
@@ -9038,11 +11377,13 @@ export function parseBenchmarkParameters(params = {}, args = process.argv.slice(
 /**
  * Parses benchmark parameters from command line arguments and returns an array of unrecognized arguments.
  *
- * @param params Input/output argument. Contains default values of parameters
- *              that will be overridden by command line arguments.
- * @param args Command line arguments to parse. When not specified,
- *            `process.argv.slice(2)` is used.
+ * @param params Input/output argument containing default values of parameters that will be overridden by command line arguments
+ * @param args (Optional) Command line arguments to parse. When not specified, process.argv.slice(2) is used
+ *
  * @returns An array of unrecognized arguments.
+ *
+ * @remarks
+ * Parses benchmark parameters from command line arguments and returns an array of unrecognized arguments.
  *
  * Functionally, this function is the same as {@link parseBenchmarkParameters}.
  * However, it does not exit the application in case of an unrecognized argument.
@@ -9082,7 +11423,7 @@ class Benchmarker {
     #solveTime = new StatsHolder;
     #solutions = new StatsHolder;
     #proof = new StatsHolder;
-    #lowerBound = new StatsHolder;
+    objectiveBound = new StatsHolder;
     #nbErrors = 0;
     #nbAbsent = 0;
     // CSV file output. Could be process.stdout, in this case normal output is suppressed.
@@ -9097,23 +11438,24 @@ class Benchmarker {
         // Modifications that will be done on the parameters of each run.
         // I.e. strip BenchmarkParameters to Parameters:
         this.#modifications = copyParameters(benchmarkParameters);
-        delete this.#modifications.nbSeeds;
-        delete this.#modifications.nbParallelRuns;
-        delete this.#modifications.minObjective;
-        delete this.#modifications.maxObjective;
-        delete this.#modifications.summary;
-        delete this.#modifications.log;
-        delete this.#modifications.logFName;
-        delete this.#modifications.result;
-        delete this.#modifications.resultFName;
-        delete this.#modifications.exportJSON;
-        delete this.#modifications.exportTxt;
-        delete this.#modifications.exportJS;
-        delete this.#modifications.exportDomains;
-        delete this.#modifications.solve;
-        delete this.#modifications.output;
-        delete this.#modifications.dontOutputSolutions;
-        delete this.#modifications.usage;
+        const mods = this.#modifications;
+        delete mods.nbSeeds;
+        delete mods.nbParallelRuns;
+        delete mods.minObjective;
+        delete mods.maxObjective;
+        delete mods.summary;
+        delete mods.log;
+        delete mods.logFName;
+        delete mods.result;
+        delete mods.resultFName;
+        delete mods.exportJSON;
+        delete mods.exportText;
+        delete mods.exportJS;
+        delete mods.exportDomains;
+        delete mods.solve;
+        delete mods.output;
+        delete mods.dontOutputSolutions;
+        delete mods.usage;
         this.#runs = [];
         let nbSeeds = this.#parameters.nbSeeds ?? 1;
         this.#hasSeedCol = (nbSeeds > 1);
@@ -9147,13 +11489,13 @@ class Benchmarker {
                 process.exit(1);
             }
             if (objMin !== undefined)
-                model.constraint(model.le(objMin, primaryObjective));
-            if (objMax != undefined)
-                model.constraint(model.le(primaryObjective, objMax));
+                model.enforce(model.le(objMin, primaryObjective));
+            if (objMax !== undefined)
+                model.enforce(model.le(primaryObjective, objMax));
         }
         let inputParameters = problem.parameters === undefined ? {} : copyParameters(problem.parameters);
         let parameters = combineParameters(inputParameters, this.#modifications);
-        let name = problem.model.getName();
+        let name = problem.model.name;
         if (name === undefined)
             name = "Problem" + (run.index + 1);
         let seed = (parameters.randomSeed ?? 1) + run.seedOffset;
@@ -9163,7 +11505,7 @@ class Benchmarker {
         conf.resultFName = this.#expandPattern(this.#parameters.result, conf);
         conf.exportJSON = this.#expandPattern(this.#parameters.exportJSON, conf);
         conf.exportJS = this.#expandPattern(this.#parameters.exportJS, conf);
-        conf.exportTxt = this.#expandPattern(this.#parameters.exportTxt, conf);
+        conf.exportText = this.#expandPattern(this.#parameters.exportText, conf);
         conf.exportDomains = this.#expandPattern(this.#parameters.exportDomains, conf);
         return conf;
     }
@@ -9198,15 +11540,15 @@ class Benchmarker {
         this.#restarts.add(r.nbRestarts);
         this.#durations.add(r.duration);
         this.#proof.add(r.proof ? 1 : 0);
-        if (r.lowerBound !== undefined) {
-            if (Array.isArray(r.lowerBound))
-                this.#lowerBound.add(r.lowerBound[0]);
+        if (r.objectiveBound !== undefined) {
+            if (Array.isArray(r.objectiveBound))
+                this.objectiveBound.add(r.objectiveBound[0]);
             else
-                this.#lowerBound.add(r.lowerBound);
+                this.objectiveBound.add(r.objectiveBound);
         }
         this.#solutions.add(r.nbSolutions);
-        if (r.bestSolutionTime !== undefined)
-            this.#solveTime.add(r.bestSolutionTime);
+        if (r.solutionTime !== undefined)
+            this.#solveTime.add(r.solutionTime);
     }
     #printSeparator() {
         let separator = "--------------------------------------------------------------------------------------------------------------------";
@@ -9259,7 +11601,7 @@ class Benchmarker {
         let f = this.#formatResult(r);
         line +=
             f.status.padStart(13) +
-                f.lowerBound.padStart(12) +
+                f.objectiveBound.padStart(12) +
                 f.objective.padStart(12) +
                 f.duration.padStart(12) +
                 f.solutionTime.padStart(12) +
@@ -9284,9 +11626,9 @@ class Benchmarker {
             seed: r.parameters.randomSeed,
             status: "ERROR",
             objective: "",
-            lowerBound: "",
+            objectiveBound: "",
             solutionTime: "",
-            lbTime: "",
+            boundTime: "",
             duration: "",
             nbSolutions: "",
             nbLNSSteps: "",
@@ -9298,13 +11640,13 @@ class Benchmarker {
             nbIntervalVars: "",
             nbConstraints: "",
             solver: "",
-            nbWorkers: "",
+            actualWorkers: "",
             cpu: "",
             solveDate: r.solveDate.toISOString()
         };
         if (r.error !== undefined)
             return result;
-        if (r.nbSolutions == 0) {
+        if (r.nbSolutions === 0) {
             if (r.proof)
                 result.status = "Infeasible";
             else
@@ -9316,11 +11658,11 @@ class Benchmarker {
             else
                 result.status = "Solution";
         }
-        result.lowerBound = this.#formatObjectiveValue(r.lowerBound);
+        result.objectiveBound = this.#formatObjectiveValue(r.objectiveBound);
         result.objective = this.#formatObjectiveValue(r.objective);
         result.duration = r.duration.toFixed(2);
-        result.solutionTime = r.bestSolutionTime === undefined ? "" : r.bestSolutionTime.toFixed(2);
-        result.lbTime = r.bestLBTime === undefined ? "" : r.bestLBTime.toFixed(2);
+        result.solutionTime = r.solutionTime === undefined ? "" : r.solutionTime.toFixed(2);
+        result.boundTime = r.boundTime === undefined ? "" : r.boundTime.toFixed(2);
         result.nbSolutions = r.nbSolutions.toString();
         result.nbRestarts = r.nbRestarts.toString();
         result.nbLNSSteps = r.nbLNSSteps.toString();
@@ -9330,7 +11672,7 @@ class Benchmarker {
         result.nbIntVars = r.nbIntVars.toString();
         result.nbIntervalVars = r.nbIntervalVars.toString();
         result.nbConstraints = r.nbConstraints.toString();
-        result.nbWorkers = r.nbWorkers.toString();
+        result.actualWorkers = r.actualWorkers.toString();
         result.cpu = r.cpu;
         result.solver = r.solver;
         return result;
@@ -9347,7 +11689,7 @@ class Benchmarker {
             prefix += " ";
         console.log(prefix +
             "Mean: ".padStart(10) +
-            this.#lowerBound.getAverage().toPrecision(9).padStart(12) +
+            this.objectiveBound.getAverage().toPrecision(9).padStart(12) +
             this.#objective.getAverage().toPrecision(9).padStart(12) +
             this.#durations.getAverage().toFixed(2).padStart(12) +
             this.#solveTime.getAverage().toFixed(2).padStart(12) +
@@ -9357,7 +11699,7 @@ class Benchmarker {
             this.#branches.getAverage().toFixed(0).padStart(12));
         console.log(prefix +
             "Std. Dev: ".padStart(10) +
-            this.#lowerBound.getStdDev().toPrecision(9).padStart(12) +
+            this.objectiveBound.getStdDev().toPrecision(9).padStart(12) +
             this.#objective.getStdDev().toPrecision(9).padStart(12) +
             this.#durations.getStdDev().toFixed(2).padStart(12) +
             this.#solveTime.getStdDev().toFixed(2).padStart(12) +
@@ -9367,7 +11709,7 @@ class Benchmarker {
             this.#branches.getStdDev().toFixed(0).padStart(12));
         console.log(prefix +
             "Min: ".padStart(10) +
-            this.#lowerBound.min.toPrecision(9).padStart(12) +
+            this.objectiveBound.min.toPrecision(9).padStart(12) +
             this.#objective.min.toPrecision(9).padStart(12) +
             this.#durations.min.toFixed(2).padStart(12) +
             this.#solveTime.min.toFixed(2).padStart(12) +
@@ -9377,7 +11719,7 @@ class Benchmarker {
             this.#branches.min.toFixed(0).padStart(12));
         console.log(prefix +
             "Max: ".padStart(10) +
-            this.#lowerBound.max.toPrecision(9).padStart(12) +
+            this.objectiveBound.max.toPrecision(9).padStart(12) +
             this.#objective.max.toPrecision(9).padStart(12) +
             this.#durations.max.toFixed(2).padStart(12) +
             this.#solveTime.max.toFixed(2).padStart(12) +
@@ -9387,7 +11729,7 @@ class Benchmarker {
             this.#branches.max.toFixed(0).padStart(12));
     }
     #writeRange(min, max) {
-        if (min == max)
+        if (min === max)
             return "" + min;
         return min + ".." + max;
     }
@@ -9399,7 +11741,7 @@ class Benchmarker {
         const domains = propagationResult.domains;
         let result = "";
         for (const v of model.getBoolVars()) {
-            let name = v.getName();
+            let name = v.name;
             if (name === undefined)
                 name = "BoolVar" + v._getId();
             result += name + ": ";
@@ -9413,7 +11755,7 @@ class Benchmarker {
             result += '\n';
         }
         for (const v of model.getIntVars()) {
-            let name = v.getName();
+            let name = v.name;
             if (name === undefined)
                 name = "IntVar" + v._getId();
             result += name + ": ";
@@ -9427,7 +11769,7 @@ class Benchmarker {
             result += '\n';
         }
         for (const v of model.getIntervalVars()) {
-            let name = v.getName();
+            let name = v.name;
             if (name === undefined)
                 name = "IntervalVar" + v._getId();
             result += name + ": ";
@@ -9453,7 +11795,10 @@ class Benchmarker {
                 logStream = null;
             if (config.exportDomains !== undefined) {
                 errContext = "Cannot export domains into file '" + config.exportDomains + "'";
-                let result = await propagate(config.model, config.parameters, logStream);
+                const oldPrintLog = config.parameters.printLog;
+                config.parameters.printLog = logStream ?? false;
+                let result = await propagate(config.model, config.parameters);
+                config.parameters.printLog = oldPrintLog;
                 let domains = this.#writeDomains(config.model, result);
                 await fs.promises.writeFile(config.exportDomains, domains);
             }
@@ -9469,44 +11814,50 @@ class Benchmarker {
                 nbRestarts: 0,
                 memoryUsed: 0,
                 objectiveHistory: [],
-                lowerBoundHistory: [],
+                objectiveBoundHistory: [],
                 nbIntVars: 0,
                 nbIntervalVars: 0,
                 nbConstraints: 0,
-                nbWorkers: 0,
+                actualWorkers: 0,
                 cpu: "",
                 solver: "",
                 solveDate: new Date(),
                 parameters: config.parameters,
                 modelName: config.name,
-                objectiveSense: undefined
+                objectiveSense: undefined,
+                // Deprecated fields:
+                lowerBoundHistory: [],
+                nbWorkers: 0
             };
             // By default #parameters.solve is undefined what means true. So we compare the following way:
             if (this.#parameters.solve !== false) {
                 const oldLogLevel = config.parameters.logLevel;
+                const oldPrintLog = config.parameters.printLog;
                 if (this.#logOff)
                     config.parameters.logLevel = 0;
+                config.parameters.printLog = logStream ?? false;
                 errContext = "Error while solving the model";
-                let solveResult = await solve(config.model, config.parameters, config.warmStart, logStream);
-                // Restore old logLevel for the case we call export below:
+                let solveResult = await config.model.solve(config.parameters, config.warmStart);
+                // Restore old values for the case we call export below:
                 config.parameters.logLevel = oldLogLevel;
+                config.parameters.printLog = oldPrintLog;
                 result = { ...solveResult, parameters: config.parameters, modelName: config.name, solveDate: new Date(), error: undefined };
             }
             // Exports are done after solve so it can contain solution as a warm start:
             if (config.exportJSON !== undefined) {
                 errContext = "Cannot export JSON model into file '" + config.exportJSON + "': ";
-                await fs.promises.writeFile(config.exportJSON, problem2json({ model: config.model, parameters: config.parameters, warmStart: result.bestSolution }));
+                await fs.promises.writeFile(config.exportJSON, config.model.toJSON(config.parameters, result.solution));
             }
-            if (config.exportTxt !== undefined) {
-                errContext = "Cannot export problem into Txt file '" + config.exportTxt + "'";
-                let txt = await problem2txt(config.model, config.parameters, result.bestSolution, logStream);
+            if (config.exportText !== undefined) {
+                errContext = "Cannot export problem into text file '" + config.exportText + "'";
+                let txt = await config.model.toText(config.parameters, result.solution);
                 if (txt === undefined)
                     throw "No content generated.";
-                await fs.promises.writeFile(config.exportTxt, txt);
+                await fs.promises.writeFile(config.exportText, txt);
             }
             if (config.exportJS !== undefined) {
                 errContext = "Cannot export problem into JS file '" + config.exportJS + "'";
-                let js = await problem2js(config.model, config.parameters, result.bestSolution, logStream);
+                let js = await config.model.toJS(config.parameters, result.solution);
                 if (js === undefined)
                     throw "No content generated.";
                 await fs.promises.writeFile(config.exportJS, js);
@@ -9533,7 +11884,7 @@ class Benchmarker {
             });
         // Delete the solution if required (to save memory):
         if (this.#parameters.dontOutputSolutions === true && result.error === undefined)
-            result.bestSolution = undefined;
+            result.solution = undefined;
         this.#results.push(result);
         this.#printRun(iteration, result);
         this.#appendCSVsummary(result);
@@ -9549,9 +11900,9 @@ class Benchmarker {
     }
     async run() {
         let ctrlCPressed = false;
-        const ctrlCHandler = () => { ctrlCPressed = true; console.log(" Aborting (Ctrl-C pressed)."); };
+        const ctrlCHandler = () => { ctrlCPressed = true; console.log(" Aborting (interrupted)."); };
         process.on('SIGINT', ctrlCHandler);
-        if (this.#runs.length == 1) {
+        if (this.#runs.length === 1) {
             await this.#runIteration(this.#runs[0]);
             this.#finalizeOutput();
             process.removeListener('SIGINT', ctrlCHandler);
@@ -9567,6 +11918,7 @@ class Benchmarker {
             // index in the queue).  Therefore we chain the functions so that the
             // finished promise removes itself from the queue automatically:
             const p = this.#runIteration(this.#runs[i]).then(() => {
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises -- splice returns removed (already handled) promises
                 queue.splice(queue.indexOf(p), 1);
             });
             queue.push(p);
@@ -9630,10 +11982,10 @@ class Benchmarker {
             f.seed + ";" +
             f.status + ";" +
             f.objective + ";" +
-            f.lowerBound + ";" +
+            f.objectiveBound + ";" +
             f.duration + ";" +
             f.solutionTime + ";" +
-            f.lbTime + ";" +
+            f.boundTime + ";" +
             f.nbSolutions + ";" +
             f.nbLNSSteps + ";" +
             f.nbRestarts + ";" +
@@ -9644,7 +11996,7 @@ class Benchmarker {
             f.nbIntervalVars + ";" +
             f.nbConstraints + ";" +
             '"' + f.solver + '";' +
-            f.nbWorkers + ";" +
+            f.actualWorkers + ";" +
             r.parameters.timeLimit + ";" +
             '"' + parametersToCLA(r.parameters) + '";' +
             '"' + f.cpu + '";' +
@@ -9664,41 +12016,36 @@ class Benchmarker {
 /**
  * Benchmark the given model or a set of models.
  *
- * @param problemGenerator A function that takes an input and returns a
- *                         {@link ProblemDefinition} or a {@link Model}.
- *                         The function will be called for each input in the array `inputs`.
+ * @param problemGenerator A function that takes an input and returns a {@class ProblemDefinition} or a {@class Model}. The function will be called for each input in the array `inputs`.
  * @param inputs An array of inputs to the problem generator.
- * @param params Benchmark parameters to use (it includes {@link Parameters} of the solver).
+ * @param params Benchmark parameters to use (it includes {@class Parameters} of the solver).
+ *
  * @returns An array of results, one for each run.
  *
  * @remarks
- *
  * This function is used to run benchmarks of the solver. It can be used to
  * solve a single model or multiple models. The models can be generated from
  * data files, or they can be generated on the fly. The function can also
  * export the models into JSON, JavaScript, or text formats.
  *
  * The function will call the given `problemGenerator` for each input in the
- * array `inputs`.  The input can be anything; it is up to the problem generator
- * to interpret it (it could be, e.g., a name of a a file).  The problem
+ * array `inputs`. The input can be anything; it is up to the problem generator
+ * to interpret it (it could be, e.g., a name of a file). The problem
  * generator should return either a {@link Model} or a {@link ProblemDefinition}
- * (a model with parameters and a warm start).  Then, the function will solve the
+ * (a model with parameters and a warm start). Then, the function will solve the
  * model and return an array of results.
  *
  * Using {@link BenchmarkParameters} it is possible to specify additional
  * parameters of the benchmark. For example:
  *
- * * Each problem can be solved multiple times with different random
- *   random seeds (using parameter
- *   {@link BenchmarkParameters.nbSeeds | BenchmarkParameters.nbSeeds}).
+ * - Each problem can be solved multiple times with different random
+ *   seeds (using parameter {@link BenchmarkParameters.nbSeeds}).
  *   This is useful for getting more reliable statistics about the problem's performance.
- * * Multiple models can be solved in parallel to speed up the
- *   computation (using parameter
- *   {@link BenchmarkParameters.nbParallelRuns |
- *   BenchmarkParameters.nbParallelRuns}). In this case, it is useful to limit
- *   the  number of threads for each solve by parameter
- *   {@link Parameters.nbWorkers | Parameters.nbWorkers}.
- * * The function can also output the results in CSV or JSON formats
+ * - Multiple models can be solved in parallel to speed up the
+ *   computation (using parameter {@link BenchmarkParameters.nbParallelRuns}).
+ *   In this case, it is useful to limit the number of threads for each solve
+ *   by parameter {@link Parameters.nbWorkers}.
+ * - The function can also output the results in CSV or JSON formats
  *   or export the models into JSON, JavaScript, or text formats.
  *
  * See {@link BenchmarkParameters} for more details.
@@ -9719,26 +12066,15 @@ class Benchmarker {
  * parameters from the problem definition are used as a base, and the parameters
  * from `params` are used to overwrite them (using {@link combineParameters}).
  *
- * @example
- *
- * Suppose we have a function `createModel` that takes a filename as
- * a parameter and returns {@link Model}. For example, the function can model
- * the jobshop problem and read the data from a file.
- *
- * We are going to create a command line application around `createModel`
- * that allows solving multiple models, using multiple random seeds,
- * run benchmarks in parallel, store results in files, etc.
- *
  * ```ts
  * import * as CP from '@scheduleopt/optalcp';
  *
  * function createModel(filename: string): CP.Model {
- *   ...
+ *   // ...
  * }
  *
- *
  * let params: CP.BenchmarkParameters = {
- *   // What to print when --help is specified (assuming that the program name is mybenchmark.js):
+ *   // What to print when --help is specified:
  *   usage: "Usage: node mybenchmark.js [options] <datafile1> [<datafile2> ...",
  *   // Unless specified differently on the command line, the time limit will be 60s:
  *   timeLimit: 60
@@ -9760,21 +12096,25 @@ class Benchmarker {
  *
  * In this case, the program will solve all benchmarks from the directory `data`, running
  * two solves in parallel, each with two workers (threads). The first worker will use
- * propagation level 4 for the {@link Model.noOverlap}  constraint. The results will be
+ * propagation level 4 for the {@link Model.noOverlap} constraint. The results will be
  * stored in JSON file `results.json` (an array of {@link BenchmarkResult} objects),
  * a summary will be stored in CSV file `summary.csv`, and the log files for individual
  * runs will be stored in the directory `logs` (one file for each run named
- * after the model, see {@link Model.setName | Model.setName}.
+ * after the model, see {@link Model.name}).
  *
  * @group Benchmarking
- *
  */
 export async function benchmark(problemGenerator, inputs, params) {
-    if (inputs.length == 0) {
+    if (inputs.length === 0) {
         console.error("No inputs specified.");
         process.exit(1);
     }
     let benchmarker = new Benchmarker(problemGenerator, inputs, params);
     return benchmarker.run();
 }
+// ==================================================
+// Deprecated top-level API
+// ==================================================
+/** @deprecated Use `ModelElement` instead. */
+export const ModelNode = ModelElement;
 //# sourceMappingURL=index.js.map
