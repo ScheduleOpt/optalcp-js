@@ -1,6 +1,6 @@
 {
   "name": "@scheduleopt/optalcp",
-  "version": "2025.12.1",
+  "version": "2025.12.2",
   "description": "Javascript interface for OptalCP solver",
   "keywords": [
     "optimization",

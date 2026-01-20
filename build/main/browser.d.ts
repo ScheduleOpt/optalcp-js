@@ -1,8 +1,8 @@
 /**
  * The version of the module, such as "1.0.0".
- * @group Constants
+ * @category Constants
  */
-export declare const Version = "2025.12.1";
+export declare const Version = "2025.12.2";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -56,7 +56,7 @@ type SerializedModelData = {
  *
  * For any value of `x` in the range [10000000, 20000000], the expression `x*x` exceeds {@link IntVarMax} and cannot be computed, making the model infeasible.
  *
- * @group Constants
+ * @category Constants
  */
 export declare const IntVarMax = 1073741823;
 /**
@@ -76,7 +76,7 @@ export declare const IntVarMax = 1073741823;
  * const x = model.intVar({ min: CP.IntVarMin, max: 0, name: "x" });
  * ```
  *
- * @group Constants
+ * @category Constants
  */
 export declare const IntVarMin: number;
 /**
@@ -95,7 +95,7 @@ export declare const IntVarMin: number;
  * const task = model.intervalVar({ end: [0, CP.IntervalMax], length: 10, name: "task" });
  * ```
  *
- * @group Constants
+ * @category Constants
  */
 export declare const IntervalMax = 715827882;
 /**
@@ -114,7 +114,7 @@ export declare const IntervalMax = 715827882;
  * const task = model.intervalVar({ start: [CP.IntervalMin, 0], length: 10, name: "task" });
  * ```
  *
- * @group Constants
+ * @category Constants
  */
 export declare const IntervalMin = -715827882;
 /**
@@ -134,7 +134,7 @@ export declare const IntervalMin = -715827882;
  * const task = model.intervalVar({ length: [0, CP.LengthMax], name: "task" });
  * ```
  *
- * @group Constants
+ * @category Constants
  */
 export declare const LengthMax: number;
 /** @internal */
@@ -153,7 +153,7 @@ export declare const FloatVarMin: number;
  * with additional tracking data (solution history, objective bounds history),
  * see {@link SolveResult}.
  *
- * @group Solving
+ * @category Solving
  */
 export type SolveSummary = {
     /**
@@ -299,9 +299,9 @@ export type SolveSummary = {
      * or a satisfaction problem (no objective).
      */
     objectiveSense: "minimize" | "maximize" | undefined;
-    /** @deprecated Use `actualWorkers` instead. */
+    /** @internal @deprecated Use `actualWorkers` instead. */
     nbWorkers: number;
-    /** @deprecated Use `objectiveBound` instead. */
+    /** @internal @deprecated Use `objectiveBound` instead. */
     lowerBound?: ObjectiveValue;
 };
 /**
@@ -319,9 +319,9 @@ export type SolveSummary = {
  * Interval variable `x` and expression `start` are both instances of {@link ModelElement}.
  * There are specialized descendant classes such as {@link IntervalVar} and {@link IntExpr}.
  *
- * Any modeling object can be assigned a name, see {@link ModelElement.setName} and {@link ModelElement.getName}.
+ * Any modeling object can be assigned a name using the {@link ModelElement.name} property.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare abstract class ModelElement {
     protected _props: ElementProps;
@@ -358,9 +358,9 @@ export declare abstract class ModelElement {
      */
     get name(): string | undefined;
     set name(value: string);
-    /** @deprecated Use `name` property instead */
+    /** @internal @deprecated Use `name` property instead */
     setName(name: string): void;
-    /** @deprecated Use `name` property instead */
+    /** @internal @deprecated Use `name` property instead */
     getName(): string | undefined;
     /** @internal */
     _getProps(): ElementProps;
@@ -391,7 +391,7 @@ export declare class Constraint extends ModelElement {
  * Currently, there is no way to create floating-point expressions.
  * The class is only a base class for {@link IntExpr}.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class FloatExpr extends ModelElement {
     readonly __floatExprBrand: 'FloatExpr';
@@ -510,7 +510,7 @@ export declare class FloatExpr extends ModelElement {
  * is at least 10. In this case, `precedes` is `true`.
  * 2. `x` is absent and `y` is present. In this case, `precedes` is *absent*.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class IntExpr extends FloatExpr {
     readonly __intExprBrand: 'IntExpr';
@@ -693,9 +693,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create an equality constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self equals other.
+     * @returns A boolean expression that is true when self equals `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self == other`.
@@ -723,9 +723,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create an inequality constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self does not equal other.
+     * @returns A boolean expression that is true when self does not equal `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self != other`.
@@ -753,9 +753,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create a less-than constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self is less than other.
+     * @returns A boolean expression that is true when self is less than `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self < other`.
@@ -784,9 +784,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create a less-than-or-equal constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self is less than or equal to other.
+     * @returns A boolean expression that is true when self is less than or equal to `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self <= other`.
@@ -815,9 +815,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create a greater-than constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self is greater than other.
+     * @returns A boolean expression that is true when self is greater than `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self > other`.
@@ -846,9 +846,9 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Create a greater-than-or-equal constraint.
      *
-     * @param other The expression or constant to compare against.
+     * @param rhs The expression or constant to compare against.
      *
-     * @returns A boolean expression that is true when self is greater than or equal to other.
+     * @returns A boolean expression that is true when self is greater than or equal to `rhs`.
      *
      * @remarks
      * Returns a {@link BoolExpr} representing `self >= other`.
@@ -1013,12 +1013,48 @@ export declare class IntExpr extends FloatExpr {
  * as integer expressions. In this case, `true` is equal to `1`, `false` is
  * equal to `0`, and *absent* remains *absent*.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class BoolExpr extends IntExpr {
     readonly __boolExprBrand: 'BoolExpr';
     /** @internal */
     static _Create(cp: Model, func: string, args: Array<Argument>): BoolExpr;
+    /**
+     * Adds this boolean expression as a constraint to the model.
+     *
+     * @remarks
+     * This method adds the boolean expression as a constraint to the model. It provides
+     * a fluent-style alternative to {@link Model.enforce}.
+     *
+     * A constraint is satisfied if it is not `false`. In other words, a constraint is
+     * satisfied if it is `true` or *absent*.
+     *
+     * A boolean expression that is *not* added as a constraint can have
+     * arbitrary value in a solution (`true`, `false`, or *absent*). Once added
+     * as a constraint, it can only be `true` or *absent* in the solution.
+     *
+     * @see {@link Model.enforce} for the Model-centric style of adding constraints.
+     * @see {@link BoolExpr} for more about boolean expressions.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 10, name: "y" });
+     *
+     * // Enforce constraint using fluent style
+     * x.plus(y).le(15).enforce();
+     *
+     * // Equivalent to:
+     * // model.enforce(x.plus(y).le(15));
+     *
+     * const result = await model.solve();
+     * ```
+     */
+    enforce(): void;
     /** @internal */
     _reusableBoolExpr(): BoolExpr;
     /**
@@ -1078,7 +1114,35 @@ export declare class BoolExpr extends IntExpr {
     /** @internal */
     _nand(rhs: BoolExpr | boolean): BoolExpr;
 }
-/** @internal */
+/**
+ * Represents an optimization objective in the model.
+ *
+ * @remarks
+ * An objective specifies what value should be minimized or maximized when solving the model. Objectives are created by calling {@link Model.minimize} or {@link Model.maximize}, or by using the fluent methods {@link IntExpr.minimize} or {@link IntExpr.maximize}.
+ *
+ * A model can have at most one objective.
+ *
+ * ```ts
+ * import * as CP from "optalcp";
+ *
+ * const model = new CP.Model();
+ * const x = model.intervalVar({length: 10, name: "x"});
+ * const y = model.intervalVar({length: 20, name: "y"});
+ *
+ * // Create objective using Model.minimize() - automatically registered:
+ * model.minimize(y.end());
+ *
+ * // Or using fluent style on expressions - automatically registered:
+ * y.end().minimize();
+ * ```
+ *
+ * @see {@link Model.minimize} for creating minimization objectives.
+ * @see {@link Model.maximize} for creating maximization objectives.
+ * @see {@link IntExpr.minimize} for fluent-style minimization.
+ * @see {@link IntExpr.maximize} for fluent-style maximization.
+ *
+ * @category Modeling
+ */
 export declare class Objective extends ModelElement {
     readonly __brand: 'Objective';
     /** @internal */
@@ -1114,7 +1178,7 @@ export declare class Objective extends ModelElement {
  * let z = model.intVar({ name: "z", range: [10, 20], optional: true });
  * ```
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class IntVar extends IntExpr {
     /** @internal */
@@ -1226,27 +1290,27 @@ export declare class IntVar extends IntExpr {
      */
     get max(): number | null;
     set max(value: number);
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isPresent(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     getMin(): number | null;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     getMax(): number | null;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeAbsent(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makePresent(): void;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     setMin(min: number): void;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     setMax(max: number): void;
-    /** @deprecated Use `min` and `max` properties instead */
+    /** @internal @deprecated Use `min` and `max` properties instead */
     setRange(min: number, max: number): void;
 }
 /** @internal */
@@ -1264,27 +1328,27 @@ export declare class FloatVar extends FloatExpr {
     set min(value: number);
     get max(): number | null;
     set max(value: number);
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isPresent(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     getMin(): number | null;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     getMax(): number | null;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeAbsent(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makePresent(): void;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     setMin(min: number): void;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     setMax(max: number): void;
-    /** @deprecated Use `min` and `max` properties instead */
+    /** @internal @deprecated Use `min` and `max` properties instead */
     setRange(min: number, max: number): void;
 }
 /**
@@ -1366,7 +1430,7 @@ export declare class FloatVar extends FloatExpr {
  * const result = await model.solve();
  * ```
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class BoolVar extends BoolExpr {
     /** @internal */
@@ -1476,27 +1540,27 @@ export declare class BoolVar extends BoolExpr {
      */
     get max(): boolean | null;
     set max(value: boolean);
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isPresent(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     getMin(): boolean | null;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     getMax(): boolean | null;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeAbsent(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makePresent(): void;
-    /** @deprecated Use `min` property instead */
+    /** @internal @deprecated Use `min` property instead */
     setMin(min: boolean): void;
-    /** @deprecated Use `max` property instead */
+    /** @internal @deprecated Use `max` property instead */
     setMax(max: boolean): void;
-    /** @deprecated Use `min` and `max` properties instead */
+    /** @internal @deprecated Use `min` and `max` properties instead */
     setRange(minVal: boolean, maxVal: boolean): void;
 }
 /**
@@ -1569,7 +1633,7 @@ export declare class BoolVar extends BoolExpr {
  * model.noOverlap([... , XB, ...]);
  * ```
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class IntervalVar extends ModelElement {
     readonly __brand: 'IntervalVar';
@@ -1806,53 +1870,53 @@ export declare class IntervalVar extends ModelElement {
      */
     get lengthMax(): number | null;
     set lengthMax(value: number);
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isPresent(): boolean;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
-    /** @deprecated Use `startMin` property instead */
+    /** @internal @deprecated Use `startMin` property instead */
     getStartMin(): number | null;
-    /** @deprecated Use `startMax` property instead */
+    /** @internal @deprecated Use `startMax` property instead */
     getStartMax(): number | null;
-    /** @deprecated Use `endMin` property instead */
+    /** @internal @deprecated Use `endMin` property instead */
     getEndMin(): number | null;
-    /** @deprecated Use `endMax` property instead */
+    /** @internal @deprecated Use `endMax` property instead */
     getEndMax(): number | null;
-    /** @deprecated Use `lengthMin` property instead */
+    /** @internal @deprecated Use `lengthMin` property instead */
     getLengthMin(): number | null;
-    /** @deprecated Use `lengthMax` property instead */
+    /** @internal @deprecated Use `lengthMax` property instead */
     getLengthMax(): number | null;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makePresent(): void;
-    /** @deprecated Use `optional` property instead */
+    /** @internal @deprecated Use `optional` property instead */
     makeAbsent(): void;
-    /** @deprecated Use `startMin` and `startMax` properties instead */
+    /** @internal @deprecated Use `startMin` and `startMax` properties instead */
     setStart(s: number): void;
-    /** @deprecated Use `startMin` and `startMax` properties instead */
+    /** @internal @deprecated Use `startMin` and `startMax` properties instead */
     setStart(sMin: number, sMax: number): void;
-    /** @deprecated Use `startMin` property instead */
+    /** @internal @deprecated Use `startMin` property instead */
     setStartMin(sMin: number): void;
-    /** @deprecated Use `startMax` property instead */
+    /** @internal @deprecated Use `startMax` property instead */
     setStartMax(sMax: number): void;
-    /** @deprecated Use `endMin` and `endMax` properties instead */
+    /** @internal @deprecated Use `endMin` and `endMax` properties instead */
     setEnd(e: number): void;
-    /** @deprecated Use `endMin` and `endMax` properties instead */
+    /** @internal @deprecated Use `endMin` and `endMax` properties instead */
     setEnd(eMin: number, eMax: number): void;
-    /** @deprecated Use `endMin` property instead */
+    /** @internal @deprecated Use `endMin` property instead */
     setEndMin(eMin: number): void;
-    /** @deprecated Use `endMax` property instead */
+    /** @internal @deprecated Use `endMax` property instead */
     setEndMax(eMax: number): void;
-    /** @deprecated Use `lengthMin` and `lengthMax` properties instead */
+    /** @internal @deprecated Use `lengthMin` and `lengthMax` properties instead */
     setLength(len: number): void;
-    /** @deprecated Use `lengthMin` and `lengthMax` properties instead */
+    /** @internal @deprecated Use `lengthMin` and `lengthMax` properties instead */
     setLength(lMin: number, lMax: number): void;
-    /** @deprecated Use `lengthMin` property instead */
+    /** @internal @deprecated Use `lengthMin` property instead */
     setLengthMin(lMin: number): void;
-    /** @deprecated Use `lengthMax` property instead */
+    /** @internal @deprecated Use `lengthMax` property instead */
     setLengthMax(lMax: number): void;
     /**
      * Creates a Boolean expression which is true if the interval variable is present.
@@ -2441,7 +2505,7 @@ export declare class IntervalVar extends ModelElement {
  * @see {@link SequenceVar.noOverlap} for the no-overlap constraint with transitions.
  * @see {@link Model.position} to get an interval's position in the sequence.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class SequenceVar extends ModelElement {
     readonly __brand: 'SequenceVar';
@@ -2453,7 +2517,7 @@ export declare class SequenceVar extends ModelElement {
     /**
      * Constrain the interval variables forming the sequence to not overlap.
      *
-     * @param transitions (Optional) 2D square array of minimum transition distances between the intervals. The first index is the type (index) of the first interval in the sequence, the second index is the type (index) of the second interval in the sequence
+     * @param transitions 2D square array of minimum transition distances between the intervals. The first index is the type (index) of the first interval in the sequence, the second index is the type (index) of the second interval in the sequence
      *
      * @returns The no-overlap constraint.
      *
@@ -2580,12 +2644,12 @@ export declare class SequenceVar extends ModelElement {
  *   {@link Model.stepAt}.
  *
  * Cumulative expressions can be combined using
- * {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link CumulExpr.neg} and
- * {@link Model.cumulSum}. The resulting cumulative expression represents
+ * {@link CumulExpr.plus}, {@link CumulExpr.minus}, {@link CumulExpr.neg} and
+ * {@link Model.sum}. The resulting cumulative expression represents
  * a sum of the resource usage of the combined expressions.
  *
- * Cumulative expressions can be constrained by {@link Model.cumulGe} and
- * {@link Model.cumulLe} constraints to specify the minimum and maximum
+ * Cumulative expressions can be constrained by {@link CumulExpr.ge} and
+ * {@link CumulExpr.le} to specify the minimum and maximum
  * allowed resource usage.
  *
  * **Limitations:**
@@ -2593,23 +2657,23 @@ export declare class SequenceVar extends ModelElement {
  * * Pulse-based and step-based cumulative expressions cannot be mixed.
  * * Pulses cannot have negative height. Use `-` and unary `-` only with step-based expressions.
  *
- * See {@link Model.cumulLe} and {@link Model.cumulGe} for examples.
+ * See {@link CumulExpr.le} and {@link CumulExpr.ge} for examples.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class CumulExpr extends ModelElement {
     readonly __brand: 'CumulExpr';
     /** @internal */
     static _Create(cp: Model, func: string, args: Array<Argument>): CumulExpr;
-    /** @deprecated Use `CumulExpr.plus` instead. */
+    /** @internal @deprecated Use `CumulExpr.plus` instead. */
     cumulPlus(rhs: CumulExpr): CumulExpr;
-    /** @deprecated Use `CumulExpr.minus` instead. */
+    /** @internal @deprecated Use `CumulExpr.minus` instead. */
     cumulMinus(rhs: CumulExpr): CumulExpr;
-    /** @deprecated Use `CumulExpr.le` instead. */
-    cumulLe(maxCapacity: number): Constraint;
-    /** @deprecated Use `CumulExpr.ge` instead. */
+    /** @internal @deprecated Use `CumulExpr.le` instead. */
+    cumulLe(maxCapacity: IntExpr | number): Constraint;
+    /** @internal @deprecated Use `CumulExpr.ge` instead. */
     cumulGe(minCapacity: number): Constraint;
-    /** @deprecated Use `CumulExpr.neg` instead. */
+    /** @internal @deprecated Use `CumulExpr.neg` instead. */
     cumulNeg(): CumulExpr;
     /**
      * Addition of two cumulative expressions.
@@ -2645,18 +2709,43 @@ export declare class CumulExpr extends ModelElement {
     /**
      * Constrains the cumulative function to be everywhere less or equal to `maxCapacity`.
      *
-     * @param maxCapacity The maximum capacity value.
+     * @param maxCapacity The maximum capacity value, which can be a constant or an expression.
      *
      * @returns The constraint object
      *
      * @remarks
      * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
+     *
+     * The `maxCapacity` can be a constant value or an expression. When an expression is used (such as an {@link IntVar}), the capacity becomes variable and is determined during the search.
+     *
+     * **Limitations:**
+     *
+     * - Variable capacity is only supported for discrete resources (pulses). Reservoir resources (steps) require a constant capacity.
+     * - The capacity expression must not be optional or absent.
+     *
      * See {@link Model.pulse} for an example with `le`.
+     *
+     * ### Example with variable capacity
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * let task1 = model.intervalVar({ length: 5, name: "task1" });
+     * let task2 = model.intervalVar({ length: 10, name: "task2" });
+     *
+     * // Variable capacity
+     * let extraCapacity = model.intVar({ min: 0, max: 3, name: "extraCapacity" });
+     * let totalCapacity = model.plus(4, extraCapacity);
+     *
+     * let cumul = model.sum([task1.pulse(2), task2.pulse(3)]);
+     * cumul.le(totalCapacity);
+     *
+     * model.minimize(extraCapacity);
+     * ```
      *
      * @see {@link Model.le} for the equivalent function on {@link Model}.
      * @see {@link Model.ge} for the opposite constraint.
      */
-    le(maxCapacity: number): Constraint;
+    le(maxCapacity: IntExpr | number): Constraint;
     /**
      * This function can be used to specify the minimum limit of resource usage at any time. `minCapacity`.
      *
@@ -2692,7 +2781,7 @@ export declare class CumulExpr extends ModelElement {
  * * Constraints {@link Model.forbidStart} and {@link Model.forbidEnd} forbid the start/end of an {@link IntervalVar} to be in a zero-value interval of the function.
  * * Constraint {@link Model.forbidExtent} forbids the extent of an {@link IntervalVar} to be in a zero-value interval of the function.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class IntStepFunction extends ModelElement {
     readonly __brand: 'IntStepFunction';
@@ -2735,9 +2824,9 @@ export declare class IntStepFunction extends ModelElement {
     _stepFunctionEvalInRange(arg: IntExpr | number, lb: number, ub: number): Constraint;
     /** @internal */
     _stepFunctionEvalNotInRange(arg: IntExpr | number, lb: number, ub: number): Constraint;
-    /** @deprecated Use `IntStepFunction.integral` instead. */
+    /** @internal @deprecated Use `IntStepFunction.integral` instead. */
     stepFunctionSum(interval: IntervalVar): IntExpr;
-    /** @deprecated Use `IntStepFunction.eval` instead. */
+    /** @internal @deprecated Use `IntStepFunction.eval` instead. */
     stepFunctionEval(x: IntExpr): IntExpr;
 }
 /** @internal */
@@ -2754,7 +2843,7 @@ declare class SearchDecision extends ModelElement {
  * If a parameter is not listed here, then it can be set only globally (in {@link Parameters}), not per worker.  For example, _timeLimit_ or _logPeriod_ are
  * global parameters.
  *
- * @group Parameters
+ * @category Parameters
  */
 export type WorkerParameters = {
     /**
@@ -2802,7 +2891,7 @@ export type WorkerParameters = {
      * @see {@link Parameters.preset} for automatic configuration of search and propagation.
      * @see {@link Parameters.noOverlapPropagationLevel} which works well with FDS at higher levels.
      *
-     * @group Major options
+     * @category Major options
      */
     searchType?: "Auto" | "LNS" | "FDS" | "FDSDual" | "SetTimes" | "FDSLB";
     /**
@@ -2819,7 +2908,7 @@ export type WorkerParameters = {
      *
      * The default value is `1`.
      *
-     * @group Major options
+     * @category Major options
      */
     randomSeed?: number;
     /** @internal */
@@ -2884,14 +2973,14 @@ export type WorkerParameters = {
      * @see {@link Parameters.searchType} for choosing the search algorithm.
      * @see {@link Model.noOverlap} for creating noOverlap constraints.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     noOverlapPropagationLevel?: number;
     /**
      * How much to propagate constraints on cumul functions
      *
      * @remarks
-     * This parameter controls the amount of propagation done for {@link Model.cumulLe} constraint when used with a sum of {@link Model.pulse} pulses.
+     * This parameter controls the amount of propagation done for {@link CumulExpr.le} constraint when used with a sum of {@link Model.pulse} pulses.
      *
      * Higher levels use more sophisticated algorithms that can detect more infeasibilities and prune more values from domains, but at the cost of increased computation time.
      *
@@ -2942,14 +3031,14 @@ export type WorkerParameters = {
      * @see {@link Parameters.searchType} for choosing the search algorithm.
      * @see {@link Model.pulse} for creating pulse contributions to cumulative functions.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     cumulPropagationLevel?: number;
     /**
      * How much to propagate constraints on cumul functions
      *
      * @remarks
-     * This parameter controls the amount of propagation done for {@link Model.cumulLe} and {@link Model.cumulGe} when used together with steps ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}).
+     * This parameter controls the amount of propagation done for {@link CumulExpr.le} and {@link CumulExpr.ge} when used together with steps ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}).
      *
      * The bigger the value, the more algorithms are used for propagation.
      * It means that more time is spent by the propagation, and possibly more values are removed from domains.
@@ -2960,7 +3049,7 @@ export type WorkerParameters = {
      *
      * The default value is `1`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     reservoirPropagationLevel?: number;
     /**
@@ -2977,7 +3066,7 @@ export type WorkerParameters = {
      *
      * The default value is `2`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     positionPropagationLevel?: number;
     /**
@@ -2994,7 +3083,7 @@ export type WorkerParameters = {
      *
      * The default value is `1`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     integralPropagationLevel?: number;
     /** @internal */
@@ -3015,7 +3104,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Trace
+     * @category Trace
      */
     searchTraceLevel?: number;
     /**
@@ -3032,7 +3121,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Trace
+     * @category Trace
      */
     propagationTraceLevel?: number;
     /**
@@ -3046,7 +3135,7 @@ export type WorkerParameters = {
      *
      * The default value is `0.5`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsInitialRating?: number;
     /**
@@ -3059,7 +3148,7 @@ export type WorkerParameters = {
      *
      * The default value is `1`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReductionWeight?: number;
     /**
@@ -3074,7 +3163,7 @@ export type WorkerParameters = {
      *
      * The default value is `25`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRatingAverageLength?: number;
     /**
@@ -3088,7 +3177,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsFixedAlpha?: number;
     /**
@@ -3105,7 +3194,7 @@ export type WorkerParameters = {
      *
      * The default value is `Off`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRatingAverageComparison?: "Off" | "Global" | "Depth";
     /**
@@ -3120,7 +3209,7 @@ export type WorkerParameters = {
      *
      * The default value is `Normal`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReductionFactor?: "Normal" | "Zero" | "Random";
     /**
@@ -3131,7 +3220,7 @@ export type WorkerParameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReuseClosing?: boolean;
     /**
@@ -3142,7 +3231,7 @@ export type WorkerParameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsUniformChoiceStep?: boolean;
     /**
@@ -3155,7 +3244,7 @@ export type WorkerParameters = {
      *
      * The default value is `0.699999988079071`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsLengthStepRatio?: number;
     /**
@@ -3169,7 +3258,7 @@ export type WorkerParameters = {
      *
      * The default value is `90`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxInitialChoicesPerVariable?: number;
     /**
@@ -3183,7 +3272,7 @@ export type WorkerParameters = {
      *
      * The default value is `7`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsAdditionalStepRatio?: number;
     /**
@@ -3194,7 +3283,7 @@ export type WorkerParameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsPresenceStatusChoices?: boolean;
     /**
@@ -3208,7 +3297,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxInitialLengthChoices?: number;
     /**
@@ -3221,7 +3310,7 @@ export type WorkerParameters = {
      *
      * The default value is `1073741823`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMinLengthChoiceStep?: number;
     /**
@@ -3234,7 +3323,7 @@ export type WorkerParameters = {
      *
      * The default value is `1073741823`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMinIntVarChoiceStep?: number;
     /**
@@ -3248,7 +3337,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsEventTimeInfluence?: number;
     /**
@@ -3262,7 +3351,7 @@ export type WorkerParameters = {
      *
      * The default value is `0.98`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBothFailRewardFactor?: number;
     /**
@@ -3277,7 +3366,7 @@ export type WorkerParameters = {
      *
      * The default value is `0.1`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsEpsilon?: number;
     /**
@@ -3293,7 +3382,7 @@ export type WorkerParameters = {
      *
      * The default value is `10`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingSize?: number;
     /**
@@ -3307,7 +3396,7 @@ export type WorkerParameters = {
      *
      * The default value is `6`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingDepth?: number;
     /**
@@ -3322,7 +3411,7 @@ export type WorkerParameters = {
      *
      * The default value is `Left`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingCriterion?: "Both" | "Left" | "Right";
     /**
@@ -3336,7 +3425,7 @@ export type WorkerParameters = {
      *
      * The default value is `100`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsInitialRestartLimit?: number;
     /**
@@ -3352,7 +3441,7 @@ export type WorkerParameters = {
      *
      * The default value is `Geometric`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRestartStrategy?: "Geometric" | "Nested" | "Luby";
     /**
@@ -3366,7 +3455,7 @@ export type WorkerParameters = {
      *
      * The default value is `1.15`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRestartGrowthFactor?: number;
     /**
@@ -3380,7 +3469,7 @@ export type WorkerParameters = {
      *
      * The default value is `255`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxCounterAfterRestart?: number;
     /**
@@ -3393,7 +3482,7 @@ export type WorkerParameters = {
      *
      * The default value is `255`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxCounterAfterSolution?: number;
     /**
@@ -3404,7 +3493,7 @@ export type WorkerParameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsResetRestartsAfterSolution?: boolean;
     /**
@@ -3415,7 +3504,7 @@ export type WorkerParameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsUseNogoods?: boolean;
     /** @internal */
@@ -3434,7 +3523,7 @@ export type WorkerParameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBranchOnObjective?: boolean;
     /** @internal */
@@ -3451,7 +3540,7 @@ export type WorkerParameters = {
      *
      * The default value is `FailureFirst`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBranchOrdering?: "FailureFirst" | "FailureLast" | "Random";
     /** @internal */
@@ -3468,7 +3557,7 @@ export type WorkerParameters = {
      *
      * The default value is `Random`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsDualStrategy?: "Minimum" | "Random" | "Split";
     /**
@@ -3479,7 +3568,7 @@ export type WorkerParameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsDualResetRatings?: boolean;
     /** @internal */
@@ -3530,7 +3619,7 @@ export type WorkerParameters = {
      *
      * The default value is `False`.
      *
-     * @group Large Neighborhood Search
+     * @category Large Neighborhood Search
      */
     lnsUseWarmStartOnly?: boolean;
     /** @internal */
@@ -3597,7 +3686,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBWorker?: number;
     /**
@@ -3610,7 +3699,7 @@ export type WorkerParameters = {
      *
      * The default value is `2147483647`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBMaxIterations?: number;
     /**
@@ -3623,7 +3712,7 @@ export type WorkerParameters = {
      *
      * The default value is `0`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBShavingRounds?: number;
     /** @internal */
@@ -3754,7 +3843,7 @@ export type WorkerParameters = {
  *
  * @see {@link WorkerParameters} for worker-specific parameters.
  *
- * @group Parameters
+ * @category Parameters
  */
 export type Parameters = {
     /**
@@ -3769,30 +3858,28 @@ export type Parameters = {
      *
      * @see {@link WorkerParameters} for the list of parameters that can be set per worker.
      *
-     * @group Parameters
+     * @category Parameters
      */
     workers?: WorkerParameters[];
     /**
      * Path to the solver executable or WebSocket URL.
      *
      * @remarks
-     * Specifies how to connect to the solver. Can be:
+     * Specifies how to connect to the solver.
      *
      * - **Local path**: Path to the `optalcp` executable (e.g., `/usr/bin/optalcp`). The
      *   API spawns the solver as a subprocess.
      * - **WebSocket URL**: URL starting with `ws://`, `wss://`, `http://`, or `https://`
      *   (e.g., `ws://localhost:8080`). The API connects via WebSocket to a remote solver.
+     *   In browser environments, a WebSocket URL is required since browsers cannot spawn
+     *   local processes.
      *
-     * If not specified, then the solver is searched as described in
-     * {@link Solver.findSolver}.
-     *
-     * When using WebSocket mode in browser environments, the `solver` parameter with a
-     * WebSocket URL is required since browsers cannot spawn local processes.
+     * If not specified, the solver is searched as described in {@link Solver.findSolver}.
      *
      * @see {@link Solver.findSolver} for solver discovery logic.
      * @see {@link Parameters.solverArgs} for additional subprocess arguments.
      *
-     * @group Parameters
+     * @category Parameters
      */
     solver?: string;
     /**
@@ -3815,13 +3902,13 @@ export type Parameters = {
      * // Pass custom arguments to the solver
      * const result = await model.solve({
      *   solverArgs: ['--some-debug-flag'],
-     *   timeLimit: 60000
+     *   timeLimit: 60
      * });
      * ```
      *
      * @see {@link Parameters.solver} to specify a custom solver path.
      *
-     * @group Parameters
+     * @category Parameters
      */
     solverArgs?: string[];
     /**
@@ -3869,30 +3956,9 @@ export type Parameters = {
      */
     printLog?: boolean;
     /**
-     * Usage text printed when --help is specified.
-     *
-     * @remarks
-     * The value of `usage` parameter is printed on standard output by functions
-     * {@link parseParameters}, {@link parseSomeParameters},
-     * {@link parseBenchmarkParameters} and {@link parseSomeBenchmarkParameters} when
-     * the user specifies `--help` or `-h` on the command line. The usage is followed
-     * by the list of recognized parameters of the given function.
-     *
-     * @group Parameters
+     * @internal @deprecated Use `parseParameters({ usage: "..." })` instead.
      */
     usage?: string;
-    /**
-     * Version information printed when --version is specified.
-     *
-     * @remarks
-     * If specified, then the version is printed by functions {@link parseParameters},
-     * {@link parseSomeParameters}, {@link parseBenchmarkParameters} and
-     * {@link parseSomeBenchmarkParameters}, when the user specifies `--version` on the
-     * command line. The version is followed by the version of the solver.
-     *
-     * @group Parameters
-     */
-    version?: string;
     /**
      * Whether to colorize output to the terminal
      *
@@ -3905,7 +3971,7 @@ export type Parameters = {
      *
      * The default value is `Auto`.
      *
-     * @group Terminal output
+     * @category Terminal output
      */
     color?: "Never" | "Auto" | "Always";
     /**
@@ -3921,7 +3987,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Major options
+     * @category Major options
      */
     nbWorkers?: number;
     /** @internal */
@@ -3978,7 +4044,7 @@ export type Parameters = {
      * @see {@link Parameters.noOverlapPropagationLevel} for tuning noOverlap propagation.
      * @see {@link Parameters.cumulPropagationLevel} for tuning cumulative propagation.
      *
-     * @group Major options
+     * @category Major options
      */
     preset?: "Auto" | "Default" | "Large";
     /**
@@ -4026,7 +4092,7 @@ export type Parameters = {
      * @see {@link Parameters.preset} for automatic configuration of search and propagation.
      * @see {@link Parameters.noOverlapPropagationLevel} which works well with FDS at higher levels.
      *
-     * @group Major options
+     * @category Major options
      */
     searchType?: "Auto" | "LNS" | "FDS" | "FDSDual" | "SetTimes" | "FDSLB";
     /**
@@ -4043,7 +4109,7 @@ export type Parameters = {
      *
      * The default value is `1`.
      *
-     * @group Major options
+     * @category Major options
      */
     randomSeed?: number;
     /**
@@ -4056,7 +4122,7 @@ export type Parameters = {
      *
      * The default value is `2`.
      *
-     * @group Major options
+     * @category Major options
      */
     logLevel?: number;
     /**
@@ -4069,7 +4135,7 @@ export type Parameters = {
      *
      * The default value is `2`.
      *
-     * @group Major options
+     * @category Major options
      */
     warningLevel?: number;
     /**
@@ -4082,7 +4148,7 @@ export type Parameters = {
      *
      * The default value is `10`.
      *
-     * @group Major options
+     * @category Major options
      */
     logPeriod?: number;
     /**
@@ -4093,7 +4159,7 @@ export type Parameters = {
      *
      * The default value is `False`.
      *
-     * @group Major options
+     * @category Major options
      */
     verifySolutions?: boolean;
     /**
@@ -4104,7 +4170,7 @@ export type Parameters = {
      *
      * The default value is `True`.
      *
-     * @group Major options
+     * @category Major options
      */
     verifyExternalSolutions?: boolean;
     /**
@@ -4121,7 +4187,7 @@ export type Parameters = {
      *
      * The default value is `2048`.
      *
-     * @group Major options
+     * @category Major options
      */
     allocationBlockSize?: number;
     /**
@@ -4134,7 +4200,7 @@ export type Parameters = {
      *
      * The default value is `3`.
      *
-     * @group Major options
+     * @category Major options
      */
     processExitTimeout?: number;
     /**
@@ -4147,7 +4213,7 @@ export type Parameters = {
      *
      * The default value is `Infinity`.
      *
-     * @group Limits
+     * @category Limits
      */
     timeLimit?: number;
     /**
@@ -4203,7 +4269,7 @@ export type Parameters = {
      *
      * @see {@link Parameters.timeLimit} for limiting solve time.
      *
-     * @group Limits
+     * @category Limits
      */
     solutionLimit?: number;
     /** @internal */
@@ -4229,7 +4295,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Gap Tolerance
+     * @category Gap Tolerance
      */
     absoluteGapTolerance?: number;
     /**
@@ -4245,7 +4311,7 @@ export type Parameters = {
      *
      * The default value is `0.0001`.
      *
-     * @group Gap Tolerance
+     * @category Gap Tolerance
      */
     relativeGapTolerance?: number;
     /** @internal */
@@ -4302,14 +4368,14 @@ export type Parameters = {
      * @see {@link Parameters.searchType} for choosing the search algorithm.
      * @see {@link Model.noOverlap} for creating noOverlap constraints.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     noOverlapPropagationLevel?: number;
     /**
      * How much to propagate constraints on cumul functions
      *
      * @remarks
-     * This parameter controls the amount of propagation done for {@link Model.cumulLe} constraint when used with a sum of {@link Model.pulse} pulses.
+     * This parameter controls the amount of propagation done for {@link CumulExpr.le} constraint when used with a sum of {@link Model.pulse} pulses.
      *
      * Higher levels use more sophisticated algorithms that can detect more infeasibilities and prune more values from domains, but at the cost of increased computation time.
      *
@@ -4360,14 +4426,14 @@ export type Parameters = {
      * @see {@link Parameters.searchType} for choosing the search algorithm.
      * @see {@link Model.pulse} for creating pulse contributions to cumulative functions.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     cumulPropagationLevel?: number;
     /**
      * How much to propagate constraints on cumul functions
      *
      * @remarks
-     * This parameter controls the amount of propagation done for {@link Model.cumulLe} and {@link Model.cumulGe} when used together with steps ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}).
+     * This parameter controls the amount of propagation done for {@link CumulExpr.le} and {@link CumulExpr.ge} when used together with steps ({@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt}).
      *
      * The bigger the value, the more algorithms are used for propagation.
      * It means that more time is spent by the propagation, and possibly more values are removed from domains.
@@ -4378,7 +4444,7 @@ export type Parameters = {
      *
      * The default value is `1`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     reservoirPropagationLevel?: number;
     /**
@@ -4395,7 +4461,7 @@ export type Parameters = {
      *
      * The default value is `2`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     positionPropagationLevel?: number;
     /**
@@ -4412,7 +4478,7 @@ export type Parameters = {
      *
      * The default value is `1`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     integralPropagationLevel?: number;
     /**
@@ -4425,7 +4491,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Propagation levels
+     * @category Propagation levels
      */
     usePrecedenceEnergy?: number;
     /** @internal */
@@ -4446,7 +4512,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Trace
+     * @category Trace
      */
     searchTraceLevel?: number;
     /**
@@ -4463,7 +4529,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Trace
+     * @category Trace
      */
     propagationTraceLevel?: number;
     /**
@@ -4479,7 +4545,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Trace
+     * @category Trace
      */
     infoTraceLevel?: number;
     /**
@@ -4493,7 +4559,7 @@ export type Parameters = {
      *
      * The default value is `0.5`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsInitialRating?: number;
     /**
@@ -4506,7 +4572,7 @@ export type Parameters = {
      *
      * The default value is `1`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReductionWeight?: number;
     /**
@@ -4521,7 +4587,7 @@ export type Parameters = {
      *
      * The default value is `25`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRatingAverageLength?: number;
     /**
@@ -4535,7 +4601,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsFixedAlpha?: number;
     /**
@@ -4552,7 +4618,7 @@ export type Parameters = {
      *
      * The default value is `Off`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRatingAverageComparison?: "Off" | "Global" | "Depth";
     /**
@@ -4567,7 +4633,7 @@ export type Parameters = {
      *
      * The default value is `Normal`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReductionFactor?: "Normal" | "Zero" | "Random";
     /**
@@ -4578,7 +4644,7 @@ export type Parameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsReuseClosing?: boolean;
     /**
@@ -4589,7 +4655,7 @@ export type Parameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsUniformChoiceStep?: boolean;
     /**
@@ -4602,7 +4668,7 @@ export type Parameters = {
      *
      * The default value is `0.699999988079071`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsLengthStepRatio?: number;
     /**
@@ -4616,7 +4682,7 @@ export type Parameters = {
      *
      * The default value is `90`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxInitialChoicesPerVariable?: number;
     /**
@@ -4630,7 +4696,7 @@ export type Parameters = {
      *
      * The default value is `7`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsAdditionalStepRatio?: number;
     /**
@@ -4641,7 +4707,7 @@ export type Parameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsPresenceStatusChoices?: boolean;
     /**
@@ -4655,7 +4721,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxInitialLengthChoices?: number;
     /**
@@ -4668,7 +4734,7 @@ export type Parameters = {
      *
      * The default value is `1073741823`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMinLengthChoiceStep?: number;
     /**
@@ -4681,7 +4747,7 @@ export type Parameters = {
      *
      * The default value is `1073741823`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMinIntVarChoiceStep?: number;
     /**
@@ -4695,7 +4761,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsEventTimeInfluence?: number;
     /**
@@ -4709,7 +4775,7 @@ export type Parameters = {
      *
      * The default value is `0.98`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBothFailRewardFactor?: number;
     /**
@@ -4724,7 +4790,7 @@ export type Parameters = {
      *
      * The default value is `0.1`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsEpsilon?: number;
     /**
@@ -4740,7 +4806,7 @@ export type Parameters = {
      *
      * The default value is `10`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingSize?: number;
     /**
@@ -4754,7 +4820,7 @@ export type Parameters = {
      *
      * The default value is `6`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingDepth?: number;
     /**
@@ -4769,7 +4835,7 @@ export type Parameters = {
      *
      * The default value is `Left`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsStrongBranchingCriterion?: "Both" | "Left" | "Right";
     /**
@@ -4783,7 +4849,7 @@ export type Parameters = {
      *
      * The default value is `100`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsInitialRestartLimit?: number;
     /**
@@ -4799,7 +4865,7 @@ export type Parameters = {
      *
      * The default value is `Geometric`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRestartStrategy?: "Geometric" | "Nested" | "Luby";
     /**
@@ -4813,7 +4879,7 @@ export type Parameters = {
      *
      * The default value is `1.15`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsRestartGrowthFactor?: number;
     /**
@@ -4827,7 +4893,7 @@ export type Parameters = {
      *
      * The default value is `255`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxCounterAfterRestart?: number;
     /**
@@ -4840,7 +4906,7 @@ export type Parameters = {
      *
      * The default value is `255`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsMaxCounterAfterSolution?: number;
     /**
@@ -4851,7 +4917,7 @@ export type Parameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsResetRestartsAfterSolution?: boolean;
     /**
@@ -4862,7 +4928,7 @@ export type Parameters = {
      *
      * The default value is `True`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsUseNogoods?: boolean;
     /** @internal */
@@ -4881,7 +4947,7 @@ export type Parameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBranchOnObjective?: boolean;
     /** @internal */
@@ -4898,7 +4964,7 @@ export type Parameters = {
      *
      * The default value is `FailureFirst`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsBranchOrdering?: "FailureFirst" | "FailureLast" | "Random";
     /** @internal */
@@ -4915,7 +4981,7 @@ export type Parameters = {
      *
      * The default value is `Random`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsDualStrategy?: "Minimum" | "Random" | "Split";
     /**
@@ -4926,7 +4992,7 @@ export type Parameters = {
      *
      * The default value is `False`.
      *
-     * @group Failure-Directed Search
+     * @category Failure-Directed Search
      */
     fdsDualResetRatings?: boolean;
     /** @internal */
@@ -4977,7 +5043,7 @@ export type Parameters = {
      *
      * The default value is `False`.
      *
-     * @group Large Neighborhood Search
+     * @category Large Neighborhood Search
      */
     lnsUseWarmStartOnly?: boolean;
     /** @internal */
@@ -5044,7 +5110,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBWorker?: number;
     /**
@@ -5057,7 +5123,7 @@ export type Parameters = {
      *
      * The default value is `2147483647`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBMaxIterations?: number;
     /**
@@ -5070,7 +5136,7 @@ export type Parameters = {
      *
      * The default value is `0`.
      *
-     * @group Simple Lower Bound
+     * @category Simple Lower Bound
      */
     simpleLBShavingRounds?: number;
     /** @internal */
@@ -5146,31 +5212,50 @@ export type Parameters = {
  * @returns A deep copy of the input Parameters object.
  *
  * @remarks
- * This function creates a deep copy of the input {@link Parameters} object.
+ * Creates a deep copy of the input {@link Parameters} object.
  * Afterwards, the copy can be modified without affecting
  * the original {@link Parameters} object.
  *
- * @group Parameters
+ * ```ts
+ * import * as cp from "@scheduleopt/optalcp";
+ *
+ * const params: cp.Parameters = { timeLimit: 60, nbWorkers: 4 };
+ * const copy = cp.copyParameters(params);
+ * copy.timeLimit = 120; // Does not affect original params
+ * ```
+ *
+ * @category Parameters
  */
 export declare function copyParameters(params: Parameters): Parameters;
 /**
- * Combines two Parameters settings into a new one.
+ * Merges two Parameters settings into a new one.
  *
- * @param source Input parameters that can be modified by modifications
- * @param modifications Parameters that will overwrite the parameters from source
+ * @param base Base parameters that can be overridden
+ * @param overrides Parameters that will overwrite values from base
  *
- * @returns The combined parameters object
+ * @returns The merged parameters object
  *
  * @remarks
- * The new object contains all parameters from both inputs.  If the same
- * parameter is specified in both input objects, then the value from the second
- * object `modifications` is used.
+ * The new object contains all parameters from both inputs. If the same
+ * parameter is specified in both input objects, then the value from `overrides`
+ * is used.
  *
  * Input objects are not modified.
  *
- * @group Parameters
+ * ```ts
+ * import * as cp from "@scheduleopt/optalcp";
+ *
+ * const defaults: cp.Parameters = { timeLimit: 60, nbWorkers: 4 };
+ * const overrides: cp.Parameters = { timeLimit: 120 };
+ * const merged = cp.mergeParameters(defaults, overrides);
+ * // merged = { timeLimit: 120, nbWorkers: 4 }
+ * ```
+ *
+ * @category Parameters
  */
-export declare function combineParameters(source: Parameters, modifications: Parameters): Parameters;
+export declare function mergeParameters(base: Parameters, overrides: Parameters): Parameters;
+/** @internal @deprecated Use function mergeParameters instead. */
+export declare function combineParameters(base: Parameters, overrides: Parameters): Parameters;
 /** @internal (could be made public later) */
 export type IntervalVarValue = null | {
     start: number;
@@ -5202,13 +5287,13 @@ type SerializedSolution = {
  * @see {@link Solver}.
  * @see {@link Solver.onSolution} to register a solution callback.
  *
- * @group Solving
+ * @category Solving
  */
 export type SolutionEvent = {
     /**
      * The duration of the solve at the time the solution was found, in seconds.
      *
-     * @group Solving
+     * @category Solving
      */
     solveTime: number;
     /**
@@ -5233,7 +5318,7 @@ export type SolutionEvent = {
      * The value can never be `False` because, in that case, the solver ends with an
      * error.
      *
-     * @group Solving
+     * @category Solving
      */
     valid?: true | undefined;
     /**
@@ -5246,7 +5331,7 @@ export type SolutionEvent = {
      *
      * @see {@link Solution} for accessing variable values.
      *
-     * @group Solving
+     * @category Solving
      */
     solution: Solution;
 };
@@ -5259,6 +5344,8 @@ export type SolutionEvent = {
  * lower bound; for maximization, the upper bound.
  *
  * @see {@link SolveResult.objectiveBoundHistory} for accessing the history.
+ *
+ * @category Solving
  */
 export type ObjectiveBoundEntry = {
     /**
@@ -5290,17 +5377,37 @@ export type ObjectiveBoundEntry = {
  * Note that in the preview version of OptalCP, the values of variables in
  * the solution are masked and replaced by value *absent* (`null`).
  *
- * @group Solving
+ * @category Solving
  */
 export declare class Solution {
     #private;
     /**
-     * Creates an empty solution. That is, all variables are absent, and the
-     * objective value is _undefined_.
+     * Creates an empty solution.
      *
-     * Use this function to create an external solution that can be passed to
-     * the solver before the solve starts as a _warmStart_ (see {@link solve},
-     * {@link Solver}) or during the solve using {@link Solver.sendSolution}.
+     * @remarks
+     * Creates a solution where all variables are absent, and the
+     * objective value is `None`/`undefined`.
+     *
+     * Use this constructor to create an external solution that can be passed to
+     * the solver as a warm start (see {@link Model.solve})
+     * or sent during solving using {@link Solver.sendSolution}.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const x = model.intervalVar({ length: 10, name: "x" });
+     * model.minimize(x.end());
+     *
+     * // Create an external solution
+     * const solution = new CP.Solution();
+     * solution.setValue(x, 0, 10);  // x starts at 0, ends at 10
+     *
+     * // Use it as a warm start
+     * const result = await model.solve({ timeLimit: 60 }, solution);
+     * ```
+     *
+     * @category Solving
      */
     constructor();
     /** @internal (read from a message sent by the solver) */
@@ -5450,7 +5557,7 @@ export declare class Solution {
      *
      * @see {@link Solution.setAbsent} to make the variable absent.
      */
-    setValue(boolVar: BoolVar, value: boolean): void;
+    setValue(variable: BoolVar, value: boolean): void;
     /**
      * Sets the value of the given integer variable in the solution.
      *
@@ -5462,9 +5569,9 @@ export declare class Solution {
      *
      * @see {@link Solution.setAbsent} to make the variable absent.
      */
-    setValue(intVar: IntVar, value: number): void;
+    setValue(variable: IntVar, value: number): void;
     /** @internal */
-    setValue(floatVar: FloatVar, value: number): void;
+    setValue(variable: FloatVar, value: number): void;
     /**
      * Sets the start and end of the given interval variable in the solution.
      *
@@ -5477,7 +5584,7 @@ export declare class Solution {
      *
      * @see {@link Solution.setAbsent} to make the variable absent.
      */
-    setValue(intervalVar: IntervalVar, start: number, end: number): void;
+    setValue(variable: IntervalVar, start: number, end: number): void;
     /** @internal */
     _serialize(): SerializedSolution;
 }
@@ -5532,7 +5639,7 @@ type DomainsEvent = {
  * The propagation can also finish by a limit. In this case {@link PropagationResult.domains} is
  * set to "limit".
  *
- * @group Propagation
+ * @category Propagation
  */
 export type PropagationResult = {
     /** The duration of the propagation is in seconds. */
@@ -5567,7 +5674,7 @@ export type PropagationResult = {
  * For each variable, this class provides a way to query the computed domain,
  * e.g. using function {@link ModelDomains.getStartMin}.
  *
- * @group Propagation
+ * @category Propagation
  */
 export declare class ModelDomains {
     #private;
@@ -5706,15 +5813,15 @@ export declare class ModelDomains {
  *
  * ### Combining cumulative expressions
  *
- * * {@link Model.cumulNeg}: negation.
- * * {@link Model.cumulPlus}: addition.
- * * {@link Model.cumulMinus}: subtraction.
- * * {@link Model.cumulSum}: sum of multiple expressions.
+ * * {@link CumulExpr.neg}: negation.
+ * * {@link CumulExpr.plus}: addition.
+ * * {@link CumulExpr.minus}: subtraction.
+ * * {@link Model.sum}: sum of multiple expressions.
  *
  * ### Constraints on cumulative expressions
  *
- * * {@link Model.cumulGe}: greater than or equal to a constant.
- * * {@link Model.cumulLe}: less than or equal to a constant.
+ * * {@link CumulExpr.ge}: greater than or equal to a constant.
+ * * {@link CumulExpr.le}: less than or equal to a constant.
  *
  * ### Objective
  *
@@ -5783,9 +5890,9 @@ export declare class ModelDomains {
  *     for (let task of tasks) {
  *       let start = solution.getStart(task);
  *       if (start !== null)
- *         console.log("Task " + task.getName() + " starts at " + start);
+ *         console.log("Task " + task.name + " starts at " + start);
  *       else
- *         console.log("Task " + task.getName() + " is absent (not scheduled).")
+ *         console.log("Task " + task.name + " is absent (not scheduled).")
  *     }
  *   }
  *
@@ -5800,17 +5907,49 @@ export declare class ModelDomains {
  * @see {@link Solution}.
  * @see {@link Solver}.
  *
- * @group Modeling
+ * @category Modeling
  */
 export declare class Model {
     #private;
     /**
-     * Creates a new empty model.
+     * Creates an empty optimization model.
      *
-     * Naming the model is optional.  The main purpose of the name is to
-     * distinguish between different models during benchmarking (see {@link benchmark}).
+     * @param name Optional name for the model
      *
-     * @param name Name of the model.
+     * @remarks
+     * Creates an empty model with no variables, constraints, or objective.
+     *
+     * The optional `name` parameter can be used to identify the model in logs,
+     * debugging output, and benchmarking reports. When not specified, the model
+     * remains unnamed.
+     *
+     * After creating a model, use its methods to define:
+     *
+     * - **Variables**: {@link Model.intervalVar}, {@link Model.intVar}, {@link Model.boolVar}
+     * - **Constraints**: {@link Model.noOverlap}, {@link Model.endBeforeStart}, {@link Model.enforce}, etc.
+     * - **Objective**: {@link Model.minimize} or {@link Model.maximize}
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * // Create an unnamed model
+     * const model = new CP.Model();
+     *
+     * // Create a named model (useful for debugging)
+     * const namedModel = new CP.Model("JobShop");
+     *
+     * // Add variables and constraints
+     * const task = model.intervalVar({ length: 10, name: "task" });
+     * model.minimize(task.end());
+     *
+     * // Solve
+     * const result = await model.solve();
+     * ```
+     *
+     * @see {@link Model} for available modeling methods.
+     * @see {@link Model.solve} to solve the model.
+     *
+     * @category Modeling
      */
     constructor(name?: string);
     /** @internal */
@@ -6865,7 +7004,7 @@ export declare class Model {
      *
      * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the pulse is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
      *
-     * Cumulative functions can be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     * Cumulative functions can be combined using {@link CumulExpr.plus}, {@link CumulExpr.minus}, {@link CumulExpr.neg} and {@link Model.sum}. A cumulative function's minimum and maximum height can be constrained using {@link CumulExpr.le} and {@link CumulExpr.ge}.
      *
      * @example
      *
@@ -6944,7 +7083,7 @@ export declare class Model {
      *
      * @see {@link IntervalVar.pulse} is equivalent function on {@link IntervalVar}.
      * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd}, {@link Model.stepAt} for other basic cumulative functions.
-     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     * @see {@link CumulExpr.le} and {@link CumulExpr.ge} for constraints on cumulative functions.
      */
     pulse(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
@@ -6964,7 +7103,7 @@ export declare class Model {
      *
      * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
      *
-     * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     * Cumulative steps could be combined using {@link CumulExpr.plus}, {@link CumulExpr.minus}, {@link CumulExpr.neg} and {@link Model.sum}. A cumulative function's minimum and maximum height can be constrained using {@link CumulExpr.le} and {@link CumulExpr.ge}.
      *
      * ### Formal definition
      *
@@ -7027,7 +7166,7 @@ export declare class Model {
      *
      * @see {@link IntervalVar.stepAtStart} is equivalent function on {@link IntervalVar}.
      * @see {@link Model.stepAtEnd}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
-     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     * @see {@link CumulExpr.le} and {@link CumulExpr.ge} for constraints on cumulative functions.
      */
     stepAtStart(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
@@ -7047,7 +7186,7 @@ export declare class Model {
      *
      * Note that the `interval` and the `height` may have different presence statuses (when the `height` is given by a variable or an expression). In this case, the step is present only if both the `interval` and the `height` are present. Therefore, it is helpful to constrain the `height` to have the same presence status as the `interval`.
      *
-     * Cumulative steps could be combined using {@link Model.cumulPlus}, {@link Model.cumulMinus}, {@link Model.cumulNeg} and {@link Model.cumulSum}. A cumulative function's minimum and maximum height can be constrained using {@link Model.cumulLe} and {@link Model.cumulGe}.
+     * Cumulative steps could be combined using {@link CumulExpr.plus}, {@link CumulExpr.minus}, {@link CumulExpr.neg} and {@link Model.sum}. A cumulative function's minimum and maximum height can be constrained using {@link CumulExpr.le} and {@link CumulExpr.ge}.
      *
      * ### Formal definition
      *
@@ -7110,7 +7249,7 @@ export declare class Model {
      *
      * @see {@link IntervalVar.stepAtEnd} is equivalent function on {@link IntervalVar}.
      * @see {@link Model.stepAtStart}, {@link Model.stepAt}, {@link Model.pulse} for other basic cumulative functions.
-     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     * @see {@link CumulExpr.le} and {@link CumulExpr.ge} for constraints on cumulative functions.
      */
     stepAtEnd(interval: IntervalVar, height: IntExpr | number): CumulExpr;
     /**
@@ -7132,7 +7271,7 @@ export declare class Model {
      * * `height` after `x`.
      *
      * @see {@link Model.stepAtStart}, {@link Model.stepAtEnd} for an example with `stepAt`.
-     * @see {@link Model.cumulLe} and {@link Model.cumulGe} for constraints on cumulative functions.
+     * @see {@link CumulExpr.le} and {@link CumulExpr.ge} for constraints on cumulative functions.
      */
     stepAt(x: number, height: IntExpr | number): CumulExpr;
     /** @internal */
@@ -7337,7 +7476,7 @@ export declare class Model {
      * Constrain a set of interval variables not to overlap.
      *
      * @param intervals An array of interval variables or a sequence variable to constrain
-     * @param transitions (Optional) A 2D square array of minimum transition times between the intervals
+     * @param transitions A 2D square array of minimum transition times between the intervals
      *
      * @returns The no-overlap constraint.
      *
@@ -7435,25 +7574,23 @@ export declare class Model {
      * Assigning overwrites any name that was previously set.
      *
      * ```ts
-     * import OptalCP from "optalcp";
-     *
-     * const cp = await OptalCP();
+     * import * as CP from "optalcp";
      *
      * // Set name in constructor
-     * let model = cp.Model({ name: "MySchedulingProblem" });
-     * console.log(model.getName());  // "MySchedulingProblem"
+     * let model = new CP.Model({ name: "MySchedulingProblem" });
+     * console.log(model.name);  // "MySchedulingProblem"
      *
      * // Or set name later
-     * model = cp.Model();
-     * model.setName("JobShop");
-     * console.log(model.getName());  // "JobShop"
+     * model = new CP.Model();
+     * model.name = "JobShop";
+     * console.log(model.name);  // "JobShop"
      * ```
      */
     get name(): string | undefined;
     set name(value: string);
-    /** @deprecated Use `name` property instead */
+    /** @internal @deprecated Use `name` property instead */
     setName(name: string): void;
-    /** @deprecated Use `name` property instead */
+    /** @internal @deprecated Use `name` property instead */
     getName(): string | undefined;
     /**
      * Enforces a boolean expression as a constraint in the model.
@@ -7542,7 +7679,7 @@ export declare class Model {
      * @see {@link Model.maximize} for creating maximization objectives.
      */
     enforce(constraint: Constraint | BoolExpr | boolean | Iterable<Constraint | BoolExpr | boolean>): void;
-    /** @deprecated Use `enforce` instead */
+    /** @internal @deprecated Use `enforce` instead */
     constraint(constraint: Constraint | BoolExpr | boolean): void;
     /** @internal */
     _addDirective(directive: Directive): void;
@@ -7563,8 +7700,8 @@ export declare class Model {
     /**
      * Creates a new boolean variable and adds it to the model.
      *
-     * @param params.optional (Optional) If true, the variable can be absent in a solution (default false)
-     * @param params.name (Optional) Name for the variable (useful for debugging)
+     * @param params.optional If true, the variable can be absent in a solution (default false)
+     * @param params.name Name for the variable (useful for debugging)
      *
      * @returns The created boolean variable.
      *
@@ -7618,10 +7755,10 @@ export declare class Model {
     /**
      * Creates a new integer variable and adds it to the model.
      *
-     * @param params.min (Optional) Minimum value of the variable (default 0)
-     * @param params.max (Optional) Maximum value of the variable (default {@const IntVarMax})
-     * @param params.optional (Optional) Whether the variable is optional (default false)
-     * @param params.name (Optional) Name of the variable for debugging and display
+     * @param params.min Minimum value of the variable (default 0)
+     * @param params.max Maximum value of the variable (default {@link IntVarMax})
+     * @param params.optional Whether the variable is optional (default false)
+     * @param params.name Name of the variable for debugging and display
      *
      * @returns The created integer variable.
      *
@@ -7650,7 +7787,7 @@ export declare class Model {
         optional?: boolean;
         name?: string;
     }): IntVar;
-    /** @deprecated */
+    /** @internal @deprecated */
     intVar(params: {
         range?: [number?, number?] | number;
         optional?: boolean;
@@ -7679,11 +7816,11 @@ export declare class Model {
     /**
      * Creates a new interval variable and adds it to the model.
      *
-     * @param params.start (Optional) Fixed start time or range [min, max] (default [0, {@const IntervalMax}])
-     * @param params.end (Optional) Fixed end time or range [min, max] (default [0, {@const IntervalMax}])
-     * @param params.length (Optional) Fixed length or range [min, max] (default [0, {@const IntervalMax}])
-     * @param params.optional (Optional) Whether the interval is optional (default false)
-     * @param params.name (Optional) Name of the interval for debugging and display
+     * @param params.start Fixed start time or range [min, max] (default [0, {@link IntervalMax}])
+     * @param params.end Fixed end time or range [min, max] (default [0, {@link IntervalMax}])
+     * @param params.length Fixed length or range [min, max] (default [0, {@link IntervalMax}])
+     * @param params.optional Whether the interval is optional (default false)
+     * @param params.name Name of the interval for debugging and display
      *
      * @returns The created interval variable.
      *
@@ -7740,8 +7877,8 @@ export declare class Model {
      * Creates a sequence variable from the provided set of interval variables.
      *
      * @param intervals Interval variables that will form the sequence in the solution
-     * @param types (Optional) Types of the intervals, used in particular for transition times
-     * @param name (Optional) Name assigned to the sequence variable
+     * @param types Types of the intervals, used in particular for transition times
+     * @param name Name assigned to the sequence variable
      *
      * @returns The created sequence variable
      *
@@ -7972,18 +8109,26 @@ export declare class Model {
      * Constrains cumulative function `cumul` to be everywhere less or equal to `maxCapacity`.
      *
      * @param cumul The cumulative expression.
-     * @param maxCapacity The maximum capacity value.
+     * @param maxCapacity The maximum capacity value, which can be a constant or an expression.
      *
      * @returns The constraint object
      *
      * @remarks
      * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
+     *
+     * The `maxCapacity` can be a constant value or an expression. When an expression is used (such as an {@link IntVar}), the capacity becomes variable and is determined during the search.
+     *
+     * **Limitations:**
+     *
+     * - Variable capacity is only supported for discrete resources (pulses). Reservoir resources (steps) require a constant capacity.
+     * - The capacity expression must not be optional or absent.
+     *
      * See {@link Model.pulse} for an example with `le`.
      *
      * @see {@link CumulExpr.le} for the equivalent function on {@link CumulExpr}.
      * @see {@link Model.ge} for the opposite constraint.
      */
-    le(cumul: CumulExpr, maxCapacity: number): Constraint;
+    le(cumul: CumulExpr, maxCapacity: IntExpr | number): Constraint;
     /**
      * Creates Boolean expression `lhs` &ge; `rhs`.
      *
@@ -8017,6 +8162,23 @@ export declare class Model {
      */
     ge(cumul: CumulExpr, minCapacity: number): Constraint;
     /**
+     * Constrains cumulative function to be at most `maxCapacity` (reversed parameter order).
+     *
+     * @param maxCapacity The maximum capacity value, which can be a constant or an expression.
+     * @param cumul The cumulative expression.
+     *
+     * @returns The constraint object
+     *
+     * @remarks
+     * Reversed parameter order for `model.ge(capacity, cumul)`. Equivalent to `model.le(cumul, capacity)`.
+     *
+     * This allows writing `capacity >= cumul` in a natural order.
+     *
+     * @see {@link Model.le} for the standard parameter order.
+     * @see {@link CumulExpr.le} for the fluent API.
+     */
+    ge(maxCapacity: IntExpr | number, cumul: CumulExpr): Constraint;
+    /**
      * Creates negation of the integer expression, i.e. `-arg`.
      *
      * @param arg The integer expression.
@@ -8044,29 +8206,29 @@ export declare class Model {
      * @see {@link Model.sum}, {@link Model.plus}, {@link Model.minus} for other ways to combine cumulative functions.
      */
     neg(arg: CumulExpr): CumulExpr;
-    /** @deprecated Use `Model.presence` instead. */
+    /** @internal @deprecated Use `Model.presence` instead. */
     presenceOf(arg: IntExpr | number | boolean | IntervalVar): BoolExpr;
-    /** @deprecated Use `Model.start` isntead. */
+    /** @internal @deprecated Use `Model.start` isntead. */
     startOf(interval: IntervalVar): IntExpr;
-    /** @deprecated Use `Model.end` instead. */
+    /** @internal @deprecated Use `Model.end` instead. */
     endOf(interval: IntervalVar): IntExpr;
-    /** @deprecated Use `Model.length` instead. */
+    /** @internal @deprecated Use `Model.length` instead. */
     lengthOf(interval: IntervalVar): IntExpr;
-    /** @deprecated Use `Model.sum` instead. */
+    /** @internal @deprecated Use `Model.sum` instead. */
     cumulSum(args: Array<CumulExpr>): CumulExpr;
-    /** @deprecated Use `Model.plus` instead. */
+    /** @internal @deprecated Use `Model.plus` instead. */
     cumulPlus(lhs: CumulExpr, rhs: CumulExpr): CumulExpr;
-    /** @deprecated Use `Model.minus` instead. */
+    /** @internal @deprecated Use `Model.minus` instead. */
     cumulMinus(lhs: CumulExpr, rhs: CumulExpr): CumulExpr;
-    /** @deprecated Use `Model.le` instead. */
-    cumulLe(cumul: CumulExpr, maxCapacity: number): Constraint;
-    /** @deprecated Use `Model.ge` instead. */
+    /** @internal @deprecated Use `Model.le` instead. */
+    cumulLe(cumul: CumulExpr, maxCapacity: IntExpr | number): Constraint;
+    /** @internal @deprecated Use `Model.ge` instead. */
     cumulGe(cumul: CumulExpr, minCapacity: number): Constraint;
-    /** @deprecated Use `CumulExpr.neg` instead. */
+    /** @internal @deprecated Use `CumulExpr.neg` instead. */
     cumulNeg(arg: CumulExpr): CumulExpr;
-    /** @deprecated Use `Model.integral` instead. */
+    /** @internal @deprecated Use `Model.integral` instead. */
     stepFunctionSum(func: IntStepFunction, interval: IntervalVar): IntExpr;
-    /** @deprecated Use `Model.eval` instead. */
+    /** @internal @deprecated Use `Model.eval` instead. */
     stepFunctionEval(func: IntStepFunction, x: IntExpr): IntExpr;
     /**
      * Creates a minimization objective for the provided expression.
@@ -8167,7 +8329,7 @@ export declare class Model {
         warmStart: SerializedSolution | undefined;
     };
     /** @internal */
-    _serialize(command: string, params: Parameters, warmStart?: Solution, deferSolution?: boolean): string;
+    _serialize(command: string, params: Parameters, warmStart?: Solution, batchResults?: boolean): string;
     /** @internal */
     _fromObject(data: SerializedModelData): void;
     /** @internal */
@@ -8215,12 +8377,38 @@ export declare class Model {
      * const intervals = model.getIntervalVars();
      * console.log(intervals.length);  // 2
      * for (const iv of intervals) {
-     *     console.log(iv.getName());  // "task1", "task2"
+     *     console.log(iv.name);  // "task1", "task2"
      * }
      * ```
      */
     getIntervalVars(): Array<IntervalVar>;
-    /** @internal */
+    /**
+     * Returns a list of all boolean variables in the model.
+     *
+     * @returns A list of all boolean variables in the model
+     *
+     * @remarks
+     * Returns a copy of the list containing all boolean variables that have been
+     * created in this model using {@link Model.boolVar}.
+     *
+     * @see {@link Model.getIntervalVars}, {@link Model.getIntVars}.
+     *
+     * @example
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     * const useMachineA = model.boolVar("use_machine_a");
+     * const useMachineB = model.boolVar("use_machine_b");
+     *
+     * const boolVars = model.getBoolVars();
+     * console.log(boolVars.length);  // 2
+     * for (const bv of boolVars) {
+     *     console.log(bv.name);  // "use_machine_a", "use_machine_b"
+     * }
+     * ```
+     */
     getBoolVars(): Array<BoolVar>;
     /**
      * Returns a list of all integer variables in the model.
@@ -8245,7 +8433,7 @@ export declare class Model {
      * const intVars = model.getIntVars();
      * console.log(intVars.length);  // 2
      * for (const iv of intVars) {
-     *     console.log(iv.getName());  // "x", "y"
+     *     console.log(iv.name);  // "x", "y"
      * }
      * ```
      */
@@ -8253,8 +8441,8 @@ export declare class Model {
     /**
      * Solves the model and returns the result.
      *
-     * @param params (Optional) The parameters for solving
-     * @param warm_start (Optional) The solution to start with
+     * @param parameters The parameters for solving
+     * @param warmStart The solution to start with
      *
      * @returns The result of the solve.
      *
@@ -8284,7 +8472,7 @@ export declare class Model {
      *
      * ### Parameters
      *
-     * Solver behavior can be controlled via the `params` argument. Common parameters
+     * Solver behavior can be controlled via the `parameters` argument. Common parameters
      * include:
      *
      * * `timeLimit` - Maximum solving time in seconds.
@@ -8341,14 +8529,14 @@ export declare class Model {
      * @see {@link SolveResult} for the result structure.
      * @see {@link Solution} for working with solutions.
      *
-     * @group Solving
+     * @category Solving
      */
-    solve(params?: Parameters, warmStart?: Solution): Promise<SolveResult>;
+    solve(parameters?: Parameters, warmStart?: Solution): Promise<SolveResult>;
     /**
      * Exports the model to JSON format.
      *
-     * @param params (Optional) Optional solver parameters to include
-     * @param warmStart (Optional) Optional initial solution to include
+     * @param parameters Optional solver parameters to include
+     * @param warmStart Optional initial solution to include
      *
      * @returns A string containing the model in JSON format.
      *
@@ -8373,7 +8561,7 @@ export declare class Model {
      * fs.writeFileSync("model.json", jsonStr);
      *
      * // Later, load from JSON
-     * const { model: model2, params: params2, warmStart: warmStart2 } =
+     * const { model: model2, parameters: params2, warmStart: warmStart2 } =
      *   CP.Model.fromJSON(jsonStr);
      * ```
      *
@@ -8381,7 +8569,7 @@ export declare class Model {
      * @see {@link Model.toText} to export as text format.
      * @see {@link Model.toJS} to export as JavaScript code.
      *
-     * @group Model exporting
+     * @category Model exporting
      */
     toJSON(parameters?: Parameters, warmStart?: Solution): string;
     /**
@@ -8412,7 +8600,7 @@ export declare class Model {
      * const x = model.intervalVar({ length: 10, name: "task_x" });
      * model.minimize(x.end());
      *
-     * const params = { timeLimit: 60000 };
+     * const params: CP.Parameters = { timeLimit: 60 };
      * const jsonStr = model.toJSON(params);
      *
      * // Save to file
@@ -8434,7 +8622,7 @@ export declare class Model {
      *
      * @see {@link Model.toJSON} to export to JSON.
      *
-     * @group Model exporting
+     * @category Model exporting
      */
     static fromJSON(jsonStr: string): {
         model: Model;
@@ -8444,8 +8632,8 @@ export declare class Model {
     /**
      * Converts the model to equivalent JavaScript code.
      *
-     * @param params (Optional) Optional solver parameters (included in generated code)
-     * @param warmStart (Optional) Optional initial solution to include
+     * @param parameters Optional solver parameters (included in generated code)
+     * @param warmStart Optional initial solution to include
      *
      * @returns JavaScript code representing the model.
      *
@@ -8478,14 +8666,14 @@ export declare class Model {
      * @see {@link Model.toText} to export as text format.
      * @see {@link Model.toJSON} to export as JSON (can be imported back).
      *
-     * @group Model exporting
+     * @category Model exporting
      */
-    toJS(params?: Parameters, warmStart?: Solution): Promise<string | undefined>;
+    toJS(parameters?: Parameters, warmStart?: Solution): Promise<string | undefined>;
     /**
      * Converts the model to text format similar to IBM CP Optimizer file format.
      *
-     * @param params (Optional) Optional solver parameters (mostly unused)
-     * @param warm_start (Optional) Optional initial solution to include
+     * @param parameters Optional solver parameters (mostly unused)
+     * @param warmStart Optional initial solution to include
      *
      * @returns Text representation of the model.
      *
@@ -8531,9 +8719,9 @@ export declare class Model {
      * @see {@link Model.toJS} to export as JavaScript code.
      * @see {@link Model.toJSON} to export as JSON (can be imported back).
      *
-     * @group Model exporting
+     * @category Model exporting
      */
-    toText(params?: Parameters, warmStart?: Solution): Promise<string | undefined>;
+    toText(parameters?: Parameters, warmStart?: Solution): Promise<string | undefined>;
 }
 /**
  * @internal
@@ -8617,12 +8805,10 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  * }
  * ```
  *
- * @group Solving
+ * @category Solving
  */
 export declare class Solver {
     #private;
-    objectiveBoundHistory: Array<ObjectiveBoundEntry>;
-    boundTime: number | undefined;
     /**
      * Callback for solution events from the solver.
      *
@@ -8847,26 +9033,26 @@ export declare class Solver {
     _onDomains?: (msg: DomainsEvent) => void;
     /** @internal */
     _onTextModel?: (msg: string) => void;
-    /** @deprecated Use `solver.onError = ...` instead. */
+    /** @internal @deprecated Use `solver.onError = ...` instead. */
     on(event: 'error', listener: (msg: string) => void): this;
-    /** @deprecated Use `solver.onWarning = ...` instead. */
+    /** @internal @deprecated Use `solver.onWarning = ...` instead. */
     on(event: 'warning', listener: (msg: string) => void): this;
-    /** @deprecated Use `solver.onLog = ...` instead. */
+    /** @internal @deprecated Use `solver.onLog = ...` instead. */
     on(event: 'log', listener: (msg: string) => void): this;
-    /** @deprecated Use `solver.onSolution = ...` instead. */
+    /** @internal @deprecated Use `solver.onSolution = ...` instead. */
     on(event: 'solution', listener: (msg: SolutionEvent) => void): this;
-    /** @deprecated Use `solver.onObjectiveBound = ...` instead. */
+    /** @internal @deprecated Use `solver.onObjectiveBound = ...` instead. */
     on(event: 'objectiveBound', listener: (msg: ObjectiveBoundEntry) => void): this;
-    /** @deprecated Use `solver.onObjectiveBound = ...` instead. */
+    /** @internal @deprecated Use `solver.onObjectiveBound = ...` instead. */
     on(event: 'lowerBound', listener: (msg: ObjectiveBoundEntry) => void): this;
-    /** @deprecated Use `solver.onSummary = ...` instead. */
+    /** @internal @deprecated Use `solver.onSummary = ...` instead. */
     on(event: 'summary', listener: (msg: SolveSummary) => void): this;
     /**
      * Solves a model with the specified parameters.
      *
      * @param model The model to solve
-     * @param params (Optional) The parameters for the solver
-     * @param warmStart (Optional) An initial solution to start the solver with
+     * @param params The parameters for the solver
+     * @param warmStart An initial solution to start the solver with
      *
      * @returns The result of the solve when finished.
      *
@@ -8999,6 +9185,8 @@ export declare class Solver {
  * solve time.
  *
  * @see {@link SolveResult.objectiveHistory} for accessing the history.
+ *
+ * @category Solving
  */
 export type ObjectiveEntry = {
     /**
@@ -9092,7 +9280,7 @@ export type ObjectiveEntry = {
  * }
  * ```
  *
- * @group Solving
+ * @category Solving
  */
 export type SolveResult = {
     /**
@@ -9219,7 +9407,7 @@ export type SolveResult = {
      * specified (auto-detect) or if the system has fewer cores than requested.
      */
     actualWorkers: number;
-    /** @deprecated Use actualWorkers instead. */
+    /** @internal @deprecated Use actualWorkers instead. */
     nbWorkers: number;
     /**
      * CPU name detected by the solver.
@@ -9331,17 +9519,17 @@ export type SolveResult = {
      * these are upper bounds. The entries are ordered chronologically by solve time.
      */
     objectiveBoundHistory: Array<ObjectiveBoundEntry>;
-    /** @deprecated Use `objectiveBound` instead. */
+    /** @internal @deprecated Use `objectiveBound` instead. */
     lowerBound?: ObjectiveValue;
-    /** @deprecated Use `solution` instead. */
+    /** @internal @deprecated Use `solution` instead. */
     bestSolution?: Solution;
-    /** @deprecated Use `solutionTime` instead. */
+    /** @internal @deprecated Use `solutionTime` instead. */
     bestSolutionTime?: number;
-    /** @deprecated Use `boundTime` instead. */
+    /** @internal @deprecated Use `boundTime` instead. */
     bestLBTime?: number;
-    /** @deprecated Use `solutionValid` instead. */
+    /** @internal @deprecated Use `solutionValid` instead. */
     bestSolutionValid?: true | undefined;
-    /** @deprecated Use `objectiveBoundHistory` instead. */
+    /** @internal @deprecated Use `objectiveBoundHistory` instead. */
     lowerBoundHistory: Array<ObjectiveBoundEntry>;
 };
 /**
@@ -9352,31 +9540,31 @@ export type SolveResult = {
  * it contains the model itself, the parameters to use for solving (optional)
  * and the starting solution (optional).
  *
- * @group Model exporting
+ * @category Model exporting
  */
 export type ProblemDefinition = {
     /**
      * The model to solve.
      *
-     * @group Model exporting
+     * @category Model exporting
      */
     model: Model;
     /**
      * The parameters to use for solving.
      *
-     * @group Model exporting
+     * @category Model exporting
      */
     parameters?: Parameters;
     /**
      * The solution to start with.
      *
-     * @group Model exporting
+     * @category Model exporting
      */
     warmStart?: Solution;
 };
-/** @deprecated Use `Model.toJSON` instead. */
+/** @internal @deprecated Use `Model.toJSON` instead. */
 export declare function problem2json(problem: ProblemDefinition): string;
-/** @deprecated Use `Model.fromJSON` instead. */
+/** @internal @deprecated Use `Model.fromJSON` instead. */
 export declare function json2problem(json: string): ProblemDefinition;
 /** @internal */
 export declare function _toText(model: Model, cmd: SolverCommand, params?: Parameters, warmStart?: Solution): Promise<string>;
@@ -9518,15 +9706,15 @@ export declare function _toText(model: Model, cmd: SolverCommand, params?: Param
  *
  * As we can see, this model propagates more than the previous one.
  *
- * @group Propagation
+ * @category Propagation
  */
 export declare function propagate(model: Model, parameters?: Parameters): Promise<PropagationResult>;
-/** @deprecated Use `ModelElement` instead. */
+/** @internal @deprecated Use `ModelElement` instead. */
 export declare const ModelNode: typeof ModelElement;
-/** @deprecated Use `ModelElement` instead. */
+/** @internal @deprecated Use `ModelElement` instead. */
 export type ModelNode = ModelElement;
-/** @deprecated Use `ObjectiveEntry` instead */
+/** @internal @deprecated Use `ObjectiveEntry` instead */
 export type ObjectiveHistoryItem = ObjectiveEntry;
-/** @deprecated Use `ObjectiveBoundEntry` instead */
+/** @internal @deprecated Use `ObjectiveBoundEntry` instead */
 export type LowerBoundEvent = ObjectiveBoundEntry;
 export {};
