@@ -16,7 +16,7 @@ function assert(condition, message) {
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2025.12.2";
+export const Version = "2026.1.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -7508,11 +7508,11 @@ export class Solver {
     // === Process state (reset by _resetProcessState at end of _run) ===
     #connection;
     #closeExpected = false;
-    #initialized = false;
+    #started = false;
     #handshakeReceived = false;
     // === Promise fields for start/close synchronization ===
-    #startPromise;
-    #startResolve;
+    #startPromise = Promise.resolve();
+    #startResolve = () => { };
     #closedPromise;
     #closedResolve;
     #closedReject;
@@ -7990,7 +7990,7 @@ export class Solver {
             // Batch results if no incremental callbacks are set (optimization to eliminate incremental messages)
             const batchResults = command === "solve" && this.#onSolution === undefined && this.#onObjectiveBound === undefined;
             this.#connection.send(model._serialize(command, params, warmStart, batchResults));
-            this.#initialized = true;
+            this.#started = true;
             this._onStart?.();
             this.#startResolve();
         }
@@ -8168,8 +8168,7 @@ export class Solver {
      * ```
      */
     async stop(reason) {
-        if (!this.#initialized)
-            await this.#startPromise;
+        await this.#startPromise;
         if (this.#closeExpected || !this.#connection)
             return;
         this.#sendMessage({ msg: "stop", reason: reason });
@@ -8198,8 +8197,7 @@ export class Solver {
      * receives the solution.
      */
     async sendSolution(solution) {
-        if (!this.#initialized)
-            await this.#startPromise;
+        await this.#startPromise;
         if (this.#closeExpected || !this.#connection)
             return; // The solver has already stopped.
         // Message is sent asynchronously. Solver may die in the middle of the
@@ -8221,7 +8219,7 @@ export class Solver {
      * further commands, particularly {@link stop} or {@link sendSolution}.
      */
     _hasFinished() {
-        return this.#initialized && (this.#closeExpected || !this.#connection);
+        return this.#started && (this.#closeExpected || !this.#connection);
     }
     #sendMessage(msg) {
         if (this.#connection)
@@ -8237,7 +8235,7 @@ export class Solver {
     _resetProcessState() {
         this.#connection = undefined;
         this.#closeExpected = false;
-        this.#initialized = false;
+        this.#started = false;
         this.#handshakeReceived = false;
     }
     /**

@@ -2,7 +2,7 @@
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export declare const Version = "2025.12.2";
+export declare const Version = "2026.1.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
