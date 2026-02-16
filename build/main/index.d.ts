@@ -3,7 +3,7 @@ type OutputStream = NodeJS.WritableStream | null;
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export declare const Version = "2026.1.0";
+export declare const Version = "2026.2.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -142,163 +142,24 @@ export declare const LengthMax: number;
 export declare const FloatVarMax: number;
 /** @internal */
 export declare const FloatVarMin: number;
-/**
- * Summary statistics from the solver at completion.
- *
- * @remarks
- * Contains statistics about the solve including the number of solutions found,
- * the total duration, search statistics (branches, fails, restarts), and
- * information about the model and environment.
- *
- * This class is passed to the `on_summary` callback. For a richer interface
- * with additional tracking data (solution history, objective bounds history),
- * see {@link SolveResult}.
- *
- * @category Solving
- */
+/** @internal */
 export type SolveSummary = {
-    /**
-     * Number of solutions found during the solve.
-     *
-     * @returns Solution count.
-     */
     nbSolutions: number;
-    /**
-     * Whether the solve ended with a proof (optimality or infeasibility).
-     *
-     * @returns True if the solve completed with a proof.
-     *
-     * @remarks
-     * When `True`, the solver has either:
-     *
-     * - Proved optimality (found a solution within the bounds defined by
-     *    {@link Parameters.absoluteGapTolerance} and {@link Parameters.relativeGapTolerance}), or
-     * - Proved infeasibility (no solution exists)
-     *
-     * When `False`, the solve was interrupted (e.g., by time limit) before
-     * a proof could be established.
-     */
     proof: boolean;
-    /**
-     * Total duration of the solve in seconds.
-     *
-     * @returns Seconds elapsed.
-     */
     duration: number;
-    /**
-     * Total number of branches explored during the solve.
-     *
-     * @returns Branch count.
-     */
     nbBranches: number;
-    /**
-     * Total number of failures encountered during the solve.
-     *
-     * @returns Failure count.
-     */
     nbFails: number;
-    /**
-     * Total number of Large Neighborhood Search steps.
-     *
-     * @returns LNS step count.
-     */
     nbLNSSteps: number;
-    /**
-     * Total number of restarts performed during the solve.
-     *
-     * @returns Restart count.
-     */
     nbRestarts: number;
-    /**
-     * Memory used by the solver in bytes.
-     *
-     * @returns Bytes used.
-     */
     memoryUsed: number;
-    /**
-     * Best objective value found (for optimization problems).
-     *
-     * @returns The objective value, or None if not applicable.
-     *
-     * @remarks
-     * The value is `None` when:
-     *
-     * - No objective was specified in the model (no {@link Model.minimize} or {@link Model.maximize} call).
-     * - No solution was found.
-     * - The objective expression has an absent value in the best solution.
-     */
     objective?: ObjectiveValue;
-    /**
-     * Proved bound on the objective value.
-     *
-     * @returns The objective bound, or None if no bound was proved.
-     *
-     * @remarks
-     * For minimization problems, this is a lower bound: the solver proved that
-     * no solution exists with an objective value less than this bound.
-     *
-     * For maximization problems, this is an upper bound: the solver proved that
-     * no solution exists with an objective value greater than this bound.
-     *
-     * The value is `None` when no bound was proved or for satisfaction problems.
-     */
     objectiveBound?: ObjectiveValue;
-    /**
-     * Number of integer variables in the model.
-     *
-     * @returns Integer variable count.
-     */
     nbIntVars: number;
-    /**
-     * Number of interval variables in the model.
-     *
-     * @returns Interval variable count.
-     */
     nbIntervalVars: number;
-    /**
-     * Number of constraints in the model.
-     *
-     * @returns Constraint count.
-     */
     nbConstraints: number;
-    /**
-     * Solver name and version string.
-     *
-     * @returns The solver identification string.
-     *
-     * @remarks
-     * Contains the solver name followed by its version number.
-     */
     solver: string;
-    /**
-     * Number of worker threads actually used during solving.
-     *
-     * @returns Worker count.
-     *
-     * @remarks
-     * This is the actual number of workers used by the solver, which may differ
-     * from the requested {@link Parameters.nbWorkers} if that parameter was not
-     * specified (auto-detect) or if the system has fewer cores than requested.
-     */
     actualWorkers: number;
-    /**
-     * CPU name detected by the solver.
-     *
-     * @returns CPU model name.
-     *
-     * @remarks
-     * Contains the CPU model name as detected by the operating system.
-     */
     cpu: string;
-    /**
-     * Objective direction.
-     *
-     * @returns 'minimize', 'maximize', or None for satisfaction problems.
-     *
-     * @remarks
-     * Indicates whether the model was a minimization problem, maximization problem,
-     * or a satisfaction problem (no objective).
-     */
     objectiveSense: "minimize" | "maximize" | undefined;
     /** @internal @deprecated Use `actualWorkers` instead. */
     nbWorkers: number;
@@ -2909,6 +2770,15 @@ export type WorkerParameters = {
      *
      * The default value is `1`.
      *
+     * ## Environment variable `OPTALCP_RANDOM_SEED`
+     *
+     * When `randomSeed` is not explicitly set (i.e. it remains at its default value of 1), the solver checks the environment variable `OPTALCP_RANDOM_SEED`. If the variable is set:
+     *
+     * *  A numeric value (e.g. `42`) is used directly as the random seed.
+     * *  The special value `RANDOM` (case-insensitive) tells the solver to generate a time-based seed.
+     *
+     * This is useful for randomizing test runs without changing application code.
+     *
      * @category Major options
      */
     randomSeed?: number;
@@ -4109,6 +3979,15 @@ export type Parameters = {
      * The parameter takes an integer value.
      *
      * The default value is `1`.
+     *
+     * ## Environment variable `OPTALCP_RANDOM_SEED`
+     *
+     * When `randomSeed` is not explicitly set (i.e. it remains at its default value of 1), the solver checks the environment variable `OPTALCP_RANDOM_SEED`. If the variable is set:
+     *
+     * *  A numeric value (e.g. `42`) is used directly as the random seed.
+     * *  The special value `RANDOM` (case-insensitive) tells the solver to generate a time-based seed.
+     *
+     * This is useful for randomizing test runs without changing application code.
      *
      * @category Major options
      */
@@ -6480,8 +6359,40 @@ export declare class Model {
     _intOptionalLinearExpr(coefficients: number[], expressions: (IntExpr | number)[], constantTerm?: number): IntExpr;
     /** @internal */
     _count(expressions: (IntExpr | number)[], value: number): IntExpr;
-    /** @internal */
-    _element(array: number[], subscript: IntExpr | number): IntExpr;
+    /**
+     * Creates an integer expression for array element lookup by index.
+     *
+     * @param array Array of integer values to select from.
+     * @param subscript Index into the array (0-based).
+     *
+     * @returns The resulting integer expression equal to `array[subscript]`.
+     *
+     * @remarks
+     * The result of `element(array, subscript)` is an integer expression equal to `array[subscript]`.
+     *
+     * Creating the expression automatically adds a side constraint that restricts `subscript` to the valid index range `0` to `n - 1`, where `n` is the number of elements in `array`. This constraint must be satisfied in every solution, regardless of how the expression is used. For example, in `element(array, subscript) == 5 || x == 1`, the subscript must be a valid index even in solutions where `x == 1` makes the disjunction true.
+     *
+     * When the `subscript` is *absent*, the result is also *absent*.
+     *
+     * @example
+     *
+     * In the following example, there are 3 machines with different processing times for a task. We use `element` to look up the processing time based on which machine is assigned.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * // Processing times for each machine:
+     * let durations = [5, 8, 3];
+     * // Decision variable: which machine to use (0, 1, or 2):
+     * let machine = model.intVar({ min: 0, max: durations.length - 1, name: "machine" });
+     * // Look up the duration for the chosen machine:
+     * let duration = model.element(durations, machine);
+     * let task = model.intervalVar({ length: duration, name: "task" });
+     * model.minimize(task.end());
+     * ```
+     *
+     * @see {@link Model.intVar} to create the subscript variable.
+     */
+    element(array: number[], subscript: IntExpr | number): IntExpr;
     /** @internal */
     _exprElement(expressions: (IntExpr | number)[], subscript: IntExpr | number): IntExpr;
     /** @internal */
@@ -8940,7 +8851,6 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  * * `trace`: Emits a `string` for every trace message.
  * * `solution`: Emits a {@link SolutionEvent} when a solution is found.
  * * `objectiveBound`: Emits a {@link ObjectiveBoundEntry} when a new lower bound is proved.
- * * `summary`: Emits {@link SolveSummary} at the end of the solve.
  * * `close`: Emits `void`. It is always the last event emitted.
  *
  * The solver output (log, trace, and warnings) is printed on the console by default.
@@ -8953,7 +8863,6 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  * the `solution` event to print the objective value of the solution
  * and the value of interval variable `x`. After finding the first solution, we request
  * the solver to stop.
- * We also subscribe to the `summary` event to print statistics about the solve.
  *
  * ```ts
  * import * as CP from '@scheduleopt/optalcp';
@@ -8981,16 +8890,10 @@ export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
  *   solver.stop("We are happy with the first solution found.");
  * });
  *
- * // Subscribe to "summary" events:
- * solver.on("summary", (msg: CP.SolveSummary) => {
- *   // Print the statistics. The statistics doesn't exist if an error occurred.
- *   console.log("Total duration of solve: " + msg.duration);
- *   console.log("Number of branches: " + msg.nbBranches);
- * });
- *
  * try {
- *   await solver.solve(model, { timeLimit: 60 });
- *   console.log("All done");
+ *   let result = await solver.solve(model, { timeLimit: 60 });
+ *   console.log("Total duration of solve: " + result.duration);
+ *   console.log("Number of branches: " + result.nbBranches);
  * } catch (e) {
  *   // We did not subscribe to "error" events. So an exception is thrown in
  *   // case of an error.
@@ -9074,45 +8977,6 @@ export declare class Solver {
      */
     get onObjectiveBound(): ((event: ObjectiveBoundEntry) => void) | ((event: ObjectiveBoundEntry) => Promise<void>) | undefined;
     set onObjectiveBound(handler: ((event: ObjectiveBoundEntry) => void) | ((event: ObjectiveBoundEntry) => Promise<void>) | undefined);
-    /**
-     * Callback for solve completion event.
-     *
-     * @remarks
-     * The callback is called once when the solve completes, providing final statistics. The default is no callback.
-     *
-     * The callback receives one argument:
-     *
-     * - `summary` ({@link SolveSummary}): Solve statistics with properties including:
-     *    - `nbSolutions` (`number`): Number of solutions found.
-     *    - `duration` (`number`): Total solve time in seconds.
-     *    - `nbBranches` (`number`): Number of branches explored.
-     *    - `objective` (`number | undefined`): Best objective value, or `undefined` if no solution found.
-     *    - Plus many other statistics (see {@link SolveSummary}).
-     *
-     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
-     *
-     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
-     *
-     * ```ts
-     * const solver = new CP.Solver();
-     *
-     * solver.onSummary = (summary: CP.SolveSummary) => {
-     *   console.log(`Solve completed: ${summary.nbSolutions} solutions`);
-     *   console.log(`Time: ${summary.duration.toFixed(2)}s`);
-     *   if (summary.objective !== undefined)
-     *     console.log(`Best objective: ${summary.objective}`);
-     * };
-     *
-     * // Asynchronous callback
-     * solver.onSummary = async (summary: CP.SolveSummary) => {
-     *   await saveStatsToDb(summary);
-     * };
-     * ```
-     *
-     * @see {@link SolveSummary} for the complete list of statistics.
-     */
-    get onSummary(): ((summary: SolveSummary) => void) | ((summary: SolveSummary) => Promise<void>) | undefined;
-    set onSummary(handler: ((summary: SolveSummary) => void) | ((summary: SolveSummary) => Promise<void>) | undefined);
     /**
      * Callback for log messages from the solver.
      *
@@ -9238,8 +9102,6 @@ export declare class Solver {
     on(event: 'objectiveBound', listener: (msg: ObjectiveBoundEntry) => void): this;
     /** @internal @deprecated Use `solver.onObjectiveBound = ...` instead. */
     on(event: 'lowerBound', listener: (msg: ObjectiveBoundEntry) => void): this;
-    /** @internal @deprecated Use `solver.onSummary = ...` instead. */
-    on(event: 'summary', listener: (msg: SolveSummary) => void): this;
     /**
      * Find path to the `optalcp` binary.
      *
@@ -9379,11 +9241,12 @@ export declare class Solver {
      *
      * Sending a solution to a solver that has already stopped has no effect.
      *
-     * The solution is sent to the solver asynchronously. Unless parameter
-     * {@link Parameters.logLevel} is set to 0, the solver will log a message when it
-     * receives the solution.
+     * If the function is called before the model is sent to the solver, the
+     * solution is queued internally and sent automatically once the model transfer
+     * completes. Unless parameter {@link Parameters.logLevel} is set to 0, the
+     * solver will log a message when it receives the solution.
      */
-    sendSolution(solution: Solution): Promise<void>;
+    sendSolution(solution: Solution): void;
     /**
      * @internal
      * Unused, undocumented, but kept for the case some user needs it.
@@ -9477,14 +9340,14 @@ export type ObjectiveEntry = {
  * **Solution data:**
  *
  * - {@link SolveResult.solution}: The best solution found (or `None` if no solution exists)
- * - {@link SolveSummary.objective}: The objective value of the best solution
- * - {@link SolveSummary.objectiveBound}: The proved bound on the objective
+ * - {@link SolveResult.objective}: The objective value of the best solution
+ * - {@link SolveResult.objectiveBound}: The proved bound on the objective
  *
  * **Solve statistics:**
  *
- * - {@link SolveSummary.nbSolutions}: Total number of solutions found
- * - {@link SolveSummary.proof}: Whether optimality or infeasibility was proved
- * - {@link SolveSummary.duration}: Total solve time in seconds
+ * - {@link SolveResult.nbSolutions}: Total number of solutions found
+ * - {@link SolveResult.proof}: Whether optimality or infeasibility was proved
+ * - {@link SolveResult.duration}: Total solve time in seconds
  *
  * **History tracking:**
  *

@@ -16,7 +16,7 @@ function assert(condition, message) {
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2026.1.0";
+export const Version = "2026.2.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -4613,8 +4613,40 @@ export class Model {
         let outParams = [this._getIntExprArray(expressions), GetInt(value)];
         return IntExpr._Create(this, "intCount", outParams);
     }
-    /** @internal */
-    _element(array, subscript) {
+    /**
+     * Creates an integer expression for array element lookup by index.
+     *
+     * @param array Array of integer values to select from.
+     * @param subscript Index into the array (0-based).
+     *
+     * @returns The resulting integer expression equal to `array[subscript]`.
+     *
+     * @remarks
+     * The result of `element(array, subscript)` is an integer expression equal to `array[subscript]`.
+     *
+     * Creating the expression automatically adds a side constraint that restricts `subscript` to the valid index range `0` to `n - 1`, where `n` is the number of elements in `array`. This constraint must be satisfied in every solution, regardless of how the expression is used. For example, in `element(array, subscript) == 5 || x == 1`, the subscript must be a valid index even in solutions where `x == 1` makes the disjunction true.
+     *
+     * When the `subscript` is *absent*, the result is also *absent*.
+     *
+     * @example
+     *
+     * In the following example, there are 3 machines with different processing times for a task. We use `element` to look up the processing time based on which machine is assigned.
+     *
+     * ```ts
+     * let model = new CP.Model;
+     * // Processing times for each machine:
+     * let durations = [5, 8, 3];
+     * // Decision variable: which machine to use (0, 1, or 2):
+     * let machine = model.intVar({ min: 0, max: durations.length - 1, name: "machine" });
+     * // Look up the duration for the chosen machine:
+     * let duration = model.element(durations, machine);
+     * let task = model.intervalVar({ length: duration, name: "task" });
+     * model.minimize(task.end());
+     * ```
+     *
+     * @see {@link Model.intVar} to create the subscript variable.
+     */
+    element(array, subscript) {
         let outParams = [this._getIntArray(array), GetIntExpr(subscript)];
         return IntExpr._Create(this, "intElement", outParams);
     }
@@ -7444,7 +7476,6 @@ export class Model {
  * * `trace`: Emits a `string` for every trace message.
  * * `solution`: Emits a {@link SolutionEvent} when a solution is found.
  * * `objectiveBound`: Emits a {@link ObjectiveBoundEntry} when a new lower bound is proved.
- * * `summary`: Emits {@link SolveSummary} at the end of the solve.
  * * `close`: Emits `void`. It is always the last event emitted.
  *
  * The solver output (log, trace, and warnings) is printed on the console by default.
@@ -7457,7 +7488,6 @@ export class Model {
  * the `solution` event to print the objective value of the solution
  * and the value of interval variable `x`. After finding the first solution, we request
  * the solver to stop.
- * We also subscribe to the `summary` event to print statistics about the solve.
  *
  * ```ts
  * import * as CP from '@scheduleopt/optalcp';
@@ -7485,16 +7515,10 @@ export class Model {
  *   solver.stop("We are happy with the first solution found.");
  * });
  *
- * // Subscribe to "summary" events:
- * solver.on("summary", (msg: CP.SolveSummary) => {
- *   // Print the statistics. The statistics doesn't exist if an error occurred.
- *   console.log("Total duration of solve: " + msg.duration);
- *   console.log("Number of branches: " + msg.nbBranches);
- * });
- *
  * try {
- *   await solver.solve(model, { timeLimit: 60 });
- *   console.log("All done");
+ *   let result = await solver.solve(model, { timeLimit: 60 });
+ *   console.log("Total duration of solve: " + result.duration);
+ *   console.log("Number of branches: " + result.nbBranches);
  * } catch (e) {
  *   // We did not subscribe to "error" events. So an exception is thrown in
  *   // case of an error.
@@ -7516,6 +7540,8 @@ export class Solver {
     #closedPromise;
     #closedResolve;
     #closedReject;
+    // === Pending solutions (queued by sendSolution before model is sent) ===
+    #pendingSolutions = [];
     // === Result state (reset by _resetResultState after extracting results) ===
     #summary = undefined;
     #objectiveHistory = [];
@@ -7538,7 +7564,6 @@ export class Solver {
     // === Private callback fields (with public getters/setters that check #solving) ===
     #onSolution;
     #onObjectiveBound;
-    #onSummary;
     #onLog;
     #onWarning;
     #onError;
@@ -7622,49 +7647,6 @@ export class Solver {
         if (this.#solving)
             throw new Error("Cannot change onObjectiveBound while solve is running");
         this.#onObjectiveBound = handler;
-    }
-    /**
-     * Callback for solve completion event.
-     *
-     * @remarks
-     * The callback is called once when the solve completes, providing final statistics. The default is no callback.
-     *
-     * The callback receives one argument:
-     *
-     * - `summary` ({@link SolveSummary}): Solve statistics with properties including:
-     *    - `nbSolutions` (`number`): Number of solutions found.
-     *    - `duration` (`number`): Total solve time in seconds.
-     *    - `nbBranches` (`number`): Number of branches explored.
-     *    - `objective` (`number | undefined`): Best objective value, or `undefined` if no solution found.
-     *    - Plus many other statistics (see {@link SolveSummary}).
-     *
-     * The callback can be either synchronous or asynchronous. If the callback raises an exception, the solve is aborted with that error.
-     *
-     * **Note:** This property cannot be changed while a solve is in progress. Attempting to set it during an active solve raises an error.
-     *
-     * ```ts
-     * const solver = new CP.Solver();
-     *
-     * solver.onSummary = (summary: CP.SolveSummary) => {
-     *   console.log(`Solve completed: ${summary.nbSolutions} solutions`);
-     *   console.log(`Time: ${summary.duration.toFixed(2)}s`);
-     *   if (summary.objective !== undefined)
-     *     console.log(`Best objective: ${summary.objective}`);
-     * };
-     *
-     * // Asynchronous callback
-     * solver.onSummary = async (summary: CP.SolveSummary) => {
-     *   await saveStatsToDb(summary);
-     * };
-     * ```
-     *
-     * @see {@link SolveSummary} for the complete list of statistics.
-     */
-    get onSummary() { return this.#onSummary; }
-    set onSummary(handler) {
-        if (this.#solving)
-            throw new Error("Cannot change onSummary while solve is running");
-        this.#onSummary = handler;
     }
     /**
      * Callback for log messages from the solver.
@@ -7798,7 +7780,6 @@ export class Solver {
             'solution': 'onSolution',
             'objectiveBound': 'onObjectiveBound',
             'lowerBound': 'onObjectiveBound', // deprecated alias
-            'summary': 'onSummary',
             'log': 'onLog',
             'warning': 'onWarning',
             'error': 'onError',
@@ -7993,6 +7974,10 @@ export class Solver {
             this.#started = true;
             this._onStart?.();
             this.#startResolve();
+            // Flush pending solutions (queued by sendSolution before model was sent)
+            for (const msg of this.#pendingSolutions)
+                this.#sendMessage(msg);
+            this.#pendingSolutions = [];
         }
         catch (err) {
             const error = err instanceof Error ? err : new Error("Unknown exception while starting solver.");
@@ -8101,8 +8086,6 @@ export class Solver {
                             objective: msg.data.objective
                         });
                     }
-                    if (!msg.data.error)
-                        void this.#callCallback(this.onSummary, this.#summary);
                     break;
                 default:
                     this.#handleError(new Error("Unknown server message type '" + msg.msg + "'."));
@@ -8192,18 +8175,19 @@ export class Solver {
      *
      * Sending a solution to a solver that has already stopped has no effect.
      *
-     * The solution is sent to the solver asynchronously. Unless parameter
-     * {@link Parameters.logLevel} is set to 0, the solver will log a message when it
-     * receives the solution.
+     * If the function is called before the model is sent to the solver, the
+     * solution is queued internally and sent automatically once the model transfer
+     * completes. Unless parameter {@link Parameters.logLevel} is set to 0, the
+     * solver will log a message when it receives the solution.
      */
-    async sendSolution(solution) {
-        await this.#startPromise;
-        if (this.#closeExpected || !this.#connection)
-            return; // The solver has already stopped.
-        // Message is sent asynchronously. Solver may die in the middle of the
-        // message.  So the documentation is correct about ignoring solutions
-        // sent about the time the solver has stopped.
-        this.#sendMessage({ msg: "solution", data: solution._serialize() });
+    sendSolution(solution) {
+        if (!this.#solving || this.#closeExpected)
+            return;
+        const msg = { msg: "solution", data: solution._serialize() };
+        if (this.#started)
+            this.#sendMessage(msg);
+        else
+            this.#pendingSolutions.push(msg);
     }
     /**
      * @internal
@@ -8252,6 +8236,7 @@ export class Solver {
         this.#boundTime = undefined;
         this.#solutionValid = undefined;
         this.#errorMessages = [];
+        this.#pendingSolutions = [];
     }
 }
 /** @internal @deprecated Use `Model.toJSON` instead. */
