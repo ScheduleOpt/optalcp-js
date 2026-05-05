@@ -3,7 +3,7 @@ type OutputStream = NodeJS.WritableStream | null;
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export declare const Version = "2026.2.0";
+export declare const Version = "2026.4.0";
 declare const enum PresenceStatus {
     Optional = 0,
     Present = 1,
@@ -167,6 +167,8 @@ export type SolveSummary = {
     lowerBound?: ObjectiveValue;
 };
 /**
+ * The base class for all modeling objects.
+ *
  * @remarks
  * The base class for all modeling objects.
  *
@@ -301,7 +303,7 @@ export declare class FloatExpr extends ModelElement {
     _floatMax2(rhs: FloatExpr | number): FloatExpr;
 }
 /**
- * A class representing an integer expression in the model.
+ * Integer expression, e.g. an arithmetic combination of variables and constants.
  *
  * @remarks
  * The expression may depend on the value of a variable (or variables), so the
@@ -542,7 +544,7 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Constrains two expressions to be identical, including their presence status.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The constraint object
      *
@@ -768,7 +770,7 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Creates an integer expression which is the minimum of the expression and `arg`.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -781,7 +783,7 @@ export declare class IntExpr extends FloatExpr {
     /**
      * Creates an integer expression which is the maximum of the expression and `arg`.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -795,6 +797,8 @@ export declare class IntExpr extends FloatExpr {
     square(): IntExpr;
 }
 /**
+ * Boolean expression, e.g. a comparison or a logical combination of other expressions.
+ *
  * @remarks
  * A class that represents a boolean expression in the model.
  * The expression may depend on one or more variables; therefore, its value
@@ -808,6 +812,7 @@ export declare class IntExpr extends FloatExpr {
  * the start of `y`:
  *
  * See {@link IntExpr.le} for the comparison method.
+ *
  * ```ts
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x" });
@@ -933,7 +938,7 @@ export declare class BoolExpr extends IntExpr {
     /**
      * Returns logical _OR_ of the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -946,7 +951,7 @@ export declare class BoolExpr extends IntExpr {
     /**
      * Returns logical _AND_ of the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -959,7 +964,7 @@ export declare class BoolExpr extends IntExpr {
     /**
      * Returns implication between the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -1011,6 +1016,8 @@ export declare class Objective extends ModelElement {
     static _Create(cp: Model, func: string, args: Array<Argument>): Objective;
 }
 /**
+ * Integer decision variable with a domain.
+ *
  * @remarks
  * Integer variable represents an unknown (integer) value that solver has to find.
  *
@@ -1034,7 +1041,7 @@ export declare class Objective extends ModelElement {
  * Each variable has a different range of possible values.
  *
  * ```ts
- * let model = CP.Model;
+ * let model = new CP.Model();
  * let x = model.intVar({ name: "x", range: [1, 3] });
  * let y = model.intVar({ name: "y", range: [0, 100] });
  * let z = model.intVar({ name: "z", range: [10, 20], optional: true });
@@ -1051,14 +1058,18 @@ export declare class IntVar extends IntExpr {
     /** @internal */
     _makeAuxiliary(): void;
     /**
-     * The presence status of the integer variable.
+     * Whether the integer variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the integer variable using a tri-state value:
+     * Gets or sets whether the integer variable is optional:
      *
      * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The variable is *present* - it must have a value in the solution.
-     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * To force a variable to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~model.presence(x))` (Python),
+     * `model.enforce(model.presence(x).not())` (TypeScript), or
+     * `model.Enforce(!model.Presence(x))` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -1080,14 +1091,10 @@ export declare class IntVar extends IntExpr {
      * // Make x optional
      * x.optional = true;
      * console.log(x.optional);  // true
-     *
-     * // Make y absent
-     * y.optional = null;
-     * console.log(y.optional);  // null
      * ```
      */
-    get optional(): boolean | null;
-    set optional(value: boolean | null);
+    get optional(): boolean;
+    set optional(value: boolean);
     /**
      * The minimum value of the integer variable's domain.
      *
@@ -1095,7 +1102,6 @@ export declare class IntVar extends IntExpr {
      * Gets or sets the minimum value of the integer variable's domain.
      *
      * The initial value is set during construction by {@link Model.intVar}.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1118,7 +1124,7 @@ export declare class IntVar extends IntExpr {
      * console.log(x.min);  // 7
      * ```
      */
-    get min(): number | null;
+    get min(): number;
     set min(value: number);
     /**
      * The maximum value of the integer variable's domain.
@@ -1127,7 +1133,6 @@ export declare class IntVar extends IntExpr {
      * Gets or sets the maximum value of the integer variable's domain.
      *
      * The initial value is set during construction by {@link Model.intVar}.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1150,7 +1155,7 @@ export declare class IntVar extends IntExpr {
      * console.log(x.max);  // 8
      * ```
      */
-    get max(): number | null;
+    get max(): number;
     set max(value: number);
     /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
@@ -1159,9 +1164,9 @@ export declare class IntVar extends IntExpr {
     /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
     /** @internal @deprecated Use `min` property instead */
-    getMin(): number | null;
+    getMin(): number;
     /** @internal @deprecated Use `max` property instead */
-    getMax(): number | null;
+    getMax(): number;
     /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
     /** @internal @deprecated Use `optional` property instead */
@@ -1184,11 +1189,11 @@ export declare class FloatVar extends FloatExpr {
     _getArg(): IndirectArgument;
     /** @internal */
     _makeAuxiliary(): void;
-    get optional(): boolean | null;
-    set optional(value: boolean | null);
-    get min(): number | null;
+    get optional(): boolean;
+    set optional(value: boolean);
+    get min(): number;
     set min(value: number);
-    get max(): number | null;
+    get max(): number;
     set max(value: number);
     /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
@@ -1197,9 +1202,9 @@ export declare class FloatVar extends FloatExpr {
     /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
     /** @internal @deprecated Use `min` property instead */
-    getMin(): number | null;
+    getMin(): number;
     /** @internal @deprecated Use `max` property instead */
-    getMax(): number | null;
+    getMax(): number;
     /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
     /** @internal @deprecated Use `optional` property instead */
@@ -1214,6 +1219,8 @@ export declare class FloatVar extends FloatExpr {
     setRange(min: number, max: number): void;
 }
 /**
+ * Boolean decision variable whose value is determined by the solver.
+ *
  * @remarks
  * Boolean variable represents an unknown truth value (`True` or `False`) that the solver must find.
  *
@@ -1303,14 +1310,18 @@ export declare class BoolVar extends BoolExpr {
     /** @internal */
     _makeAuxiliary(): void;
     /**
-     * The presence status of the boolean variable.
+     * Whether the boolean variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the boolean variable using a tri-state value:
+     * Gets or sets whether the boolean variable is optional:
      *
      * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The variable is *present* - it must have a value in the solution.
-     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * To force a variable to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~model.presence(x))` (Python),
+     * `model.enforce(model.presence(x).not())` (TypeScript), or
+     * `model.Enforce(!model.Presence(x))` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -1332,14 +1343,10 @@ export declare class BoolVar extends BoolExpr {
      * // Make x optional
      * x.optional = true;
      * console.log(x.optional);  // true
-     *
-     * // Make y absent
-     * y.optional = null;
-     * console.log(y.optional);  // null
      * ```
      */
-    get optional(): boolean | null;
-    set optional(value: boolean | null);
+    get optional(): boolean;
+    set optional(value: boolean);
     /**
      * The minimum value of the boolean variable's domain.
      *
@@ -1348,7 +1355,6 @@ export declare class BoolVar extends BoolExpr {
      *
      * For a free (unconstrained) boolean variable, returns `False`.
      * If set to `True`, the variable is fixed to `True`.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1369,7 +1375,7 @@ export declare class BoolVar extends BoolExpr {
      * console.log(x.min);  // true (variable is now fixed to true)
      * ```
      */
-    get min(): boolean | null;
+    get min(): boolean;
     set min(value: boolean);
     /**
      * The maximum value of the boolean variable's domain.
@@ -1379,7 +1385,6 @@ export declare class BoolVar extends BoolExpr {
      *
      * For a free (unconstrained) boolean variable, returns `True`.
      * If set to `False`, the variable is fixed to `False`.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1400,7 +1405,7 @@ export declare class BoolVar extends BoolExpr {
      * console.log(x.max);  // false (variable is now fixed to false)
      * ```
      */
-    get max(): boolean | null;
+    get max(): boolean;
     set max(value: boolean);
     /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
@@ -1409,9 +1414,9 @@ export declare class BoolVar extends BoolExpr {
     /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
     /** @internal @deprecated Use `min` property instead */
-    getMin(): boolean | null;
+    getMin(): boolean;
     /** @internal @deprecated Use `max` property instead */
-    getMax(): boolean | null;
+    getMax(): boolean;
     /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
     /** @internal @deprecated Use `optional` property instead */
@@ -1426,6 +1431,8 @@ export declare class BoolVar extends BoolExpr {
     setRange(minVal: boolean, maxVal: boolean): void;
 }
 /**
+ * Interval (task) variable for scheduling. Has start, end, length, and optional presence.
+ *
  * @remarks
  * Interval variable is a task, action, operation, or any other interval with a start
  * and an end. The start and the end of the interval are unknowns that the solver
@@ -1507,14 +1514,18 @@ export declare class IntervalVar extends ModelElement {
     /** @internal */
     _makeAuxiliary(): void;
     /**
-     * The presence status of the interval variable.
+     * Whether the interval variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the interval variable using a tri-state value:
+     * Gets or sets whether the interval variable is optional:
      *
      * - `True` / `true`: The interval is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The interval is *present* - it must be scheduled in the solution.
-     * - `None` / `null`: The interval is *absent* - it will be omitted from the solution (and everything that depends on it).
+     *
+     * To force an interval to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~x.presence())` (Python),
+     * `model.enforce(x.presence().not())` (TypeScript), or
+     * `model.Enforce(!x.Presence())` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -1536,14 +1547,10 @@ export declare class IntervalVar extends ModelElement {
      * // Make task1 optional
      * task1.optional = true;
      * console.log(task1.optional);  // true
-     *
-     * // Make task2 absent
-     * task2.optional = null;
-     * console.log(task2.optional);  // null
      * ```
      */
-    get optional(): boolean | null;
-    set optional(value: boolean | null);
+    get optional(): boolean;
+    set optional(value: boolean);
     /**
      * The minimum start time of the interval variable.
      *
@@ -1551,7 +1558,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the minimum start time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1574,7 +1580,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.startMin);  // 5
      * ```
      */
-    get startMin(): number | null;
+    get startMin(): number;
     set startMin(value: number);
     /**
      * The maximum start time of the interval variable.
@@ -1583,7 +1589,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the maximum start time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1604,7 +1609,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.startMax);  // 100
      * ```
      */
-    get startMax(): number | null;
+    get startMax(): number;
     set startMax(value: number);
     /**
      * The minimum end time of the interval variable.
@@ -1613,7 +1618,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the minimum end time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1636,7 +1640,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.endMin);  // 20
      * ```
      */
-    get endMin(): number | null;
+    get endMin(): number;
     set endMin(value: number);
     /**
      * The maximum end time of the interval variable.
@@ -1645,7 +1649,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the maximum end time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1666,7 +1669,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.endMax);  // 100
      * ```
      */
-    get endMax(): number | null;
+    get endMax(): number;
     set endMax(value: number);
     /**
      * The minimum length of the interval variable.
@@ -1675,7 +1678,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the minimum length of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1698,7 +1700,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.lengthMin);  // 5
      * ```
      */
-    get lengthMin(): number | null;
+    get lengthMin(): number;
     set lengthMin(value: number);
     /**
      * The maximum length of the interval variable.
@@ -1707,7 +1709,6 @@ export declare class IntervalVar extends ModelElement {
      * Gets or sets the maximum length of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -1730,7 +1731,7 @@ export declare class IntervalVar extends ModelElement {
      * console.log(task.lengthMax);  // 20
      * ```
      */
-    get lengthMax(): number | null;
+    get lengthMax(): number;
     set lengthMax(value: number);
     /** @internal @deprecated Use `optional` property instead */
     isOptional(): boolean;
@@ -1739,17 +1740,17 @@ export declare class IntervalVar extends ModelElement {
     /** @internal @deprecated Use `optional` property instead */
     isAbsent(): boolean;
     /** @internal @deprecated Use `startMin` property instead */
-    getStartMin(): number | null;
+    getStartMin(): number;
     /** @internal @deprecated Use `startMax` property instead */
-    getStartMax(): number | null;
+    getStartMax(): number;
     /** @internal @deprecated Use `endMin` property instead */
-    getEndMin(): number | null;
+    getEndMin(): number;
     /** @internal @deprecated Use `endMax` property instead */
-    getEndMax(): number | null;
+    getEndMax(): number;
     /** @internal @deprecated Use `lengthMin` property instead */
-    getLengthMin(): number | null;
+    getLengthMin(): number;
     /** @internal @deprecated Use `lengthMax` property instead */
-    getLengthMax(): number | null;
+    getLengthMax(): number;
     /** @internal @deprecated Use `optional` property instead */
     makeOptional(): void;
     /** @internal @deprecated Use `optional` property instead */
@@ -2259,9 +2260,7 @@ export declare class IntervalVar extends ModelElement {
      * @remarks
      * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
      *
-     * ## Example
-     *
-     * A production task that cannot overlap with scheduled maintenance windows:
+     * @example A production task that cannot overlap with scheduled maintenance windows:
      *
      * ```ts
      * import * as CP from "optalcp";
@@ -2307,9 +2306,33 @@ export declare class IntervalVar extends ModelElement {
      *
      * I.e., the function value at the start of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A factory task that can only start during work hours (excluding breaks):
      *
-     * A factory task that can only start during work hours (excluding breaks):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 2-hour task on a machine
+     * const task = model.intervalVar({ length: 2, name: "task" });
+     *
+     * // Allowed start times: 1 = allowed, 0 = forbidden
+     * // Morning shift 6-14h, but break at 10-11h when no new task can start
+     * const allowedStarts = model.stepFunction([
+     *     [0, 0],   // Before 6h: forbidden
+     *     [6, 1],   // 6h: shift starts, allowed
+     *     [10, 0],  // 10h: break, forbidden
+     *     [11, 1],  // 11h: break ends, allowed
+     *     [14, 0],  // 14h: shift ends, forbidden
+     * ]);
+     *
+     * // Task cannot start when allowedStarts is 0
+     * task.forbidStart(allowedStarts);
+     * model.minimize(task.start());
+     *
+     * const result = await model.solve();
+     * // Task starts at 6 (earliest allowed start time)
+     * ```
      *
      * @see {@link Model.forbidStart} for the equivalent function on {@link Model}.
      * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -2332,9 +2355,32 @@ export declare class IntervalVar extends ModelElement {
      *
      * I.e., the function value at the end of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A delivery task that must complete during business hours (not during lunch break):
      *
-     * A delivery task that must complete during business hours (not during lunch break):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 1-hour delivery task
+     * const delivery = model.intervalVar({ length: 1, name: "delivery" });
+     *
+     * // Allowed end times: 1 = allowed, 0 = forbidden
+     * const allowedEnds = model.stepFunction([
+     *     [0, 0],   // Before 9h: forbidden
+     *     [9, 1],   // 9h: business opens, allowed
+     *     [12, 0],  // 12h: lunch break, forbidden
+     *     [13, 1],  // 13h: lunch ends, allowed
+     *     [17, 0],  // 17h: business closes, forbidden
+     * ]);
+     *
+     * // Delivery cannot end when allowedEnds is 0
+     * delivery.forbidEnd(allowedEnds);
+     * model.minimize(delivery.end());
+     *
+     * const result = await model.solve();
+     * // Delivery ends at 9 (starts at 8, ends at earliest allowed time)
+     * ```
      *
      * @see {@link Model.forbidEnd} for the equivalent function on {@link Model}.
      * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -2347,6 +2393,8 @@ export declare class IntervalVar extends ModelElement {
     _related(y: IntervalVar): Directive;
 }
 /**
+ * Ordered sequence of intervals for routing and sequencing problems.
+ *
  * @remarks
  * Models a sequence (order) of interval variables.
  *
@@ -2476,6 +2524,8 @@ export declare class SequenceVar extends ModelElement {
     _sameSequence(sequence2: SequenceVar): Constraint;
 }
 /**
+ * Tracks cumulative resource usage over time for capacity constraints.
+ *
  * @remarks
  * Cumulative expression.
  *
@@ -2590,7 +2640,7 @@ export declare class CumulExpr extends ModelElement {
      * ### Example with variable capacity
      *
      * ```ts
-     * let model = new CP.Model;
+     * let model = new CP.Model();
      * let task1 = model.intervalVar({ length: 5, name: "task1" });
      * let task2 = model.intervalVar({ length: 10, name: "task2" });
      *
@@ -2629,6 +2679,8 @@ export declare class CumulExpr extends ModelElement {
     _cumulMinProfile(profile: IntStepFunction): Constraint;
 }
 /**
+ * Piecewise-constant function mapping time to integers, used for costs and availability windows.
+ *
  * @remarks
  * Integer step function.
  *
@@ -2692,12 +2744,22 @@ export declare class IntStepFunction extends ModelElement {
     stepFunctionEval(x: IntExpr): IntExpr;
 }
 /** @internal */
+export declare class StateFunction extends ModelElement {
+    readonly __brand: 'StateFunction';
+    /** @internal */
+    static _Create(cp: Model, func: string, args: Argument[]): StateFunction;
+    /** @internal */
+    _alwaysEqual(interval: IntervalVar, value: number): Constraint;
+}
+/** @internal */
 declare class SearchDecision extends ModelElement {
     readonly __brand: 'SearchDecision';
     /** @internal */
     static _Create(cp: Model, func: string, args: Array<Argument>): SearchDecision;
 }
 /**
+ * Specifies the behavior of each worker separately.
+ *
  * @remarks
  * WorkerParameters specify the behavior of each worker separately.
  * It is part of the {@link Parameters} object.
@@ -3442,6 +3504,47 @@ export type WorkerParameters = {
      * @category Failure-Directed Search
      */
     fdsDualResetRatings?: boolean;
+    /**
+     * LNS solution pool strategy.
+     *
+     * @remarks
+     * Controls how LNS manages its solution pool.
+     *
+     * - `Robust`: Maintain multiple solution tiers for diverse exploration (the default).
+     *   The solver keeps several solutions of varying quality and occasionally works on
+     *   improving worse solutions. This provides robustness against getting stuck in
+     *   local optima.
+     *
+     * - `Focused`: Concentrate all LNS effort on improving the best solution.
+     *   Secondary solution tiers are disabled, reducing memory and CPU overhead.
+     *   Recommended for large problems where maintaining multiple solutions is too
+     *   expensive.
+     *
+     * The `Large` {@link Parameters.preset} automatically selects `Focused` mode. If you
+     * explicitly set `lnsMode`, your value takes precedence over the preset.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * let model = new CP.Model();
+     * // ... build your model ...
+     *
+     * // Default: robust mode with multiple solution tiers
+     * let result = await model.solve();
+     *
+     * // Focused mode for large problems
+     * result = await model.solve({ lnsMode: "Focused" });
+     *
+     * // Or use the Large preset, which enables Focused mode automatically
+     * result = await model.solve({ preset: "Large" });
+     * ```
+     *
+     * @see {@link Parameters.preset} for automatic configuration based on problem size.
+     * @see {@link Parameters.searchType} for choosing the search algorithm.
+     *
+     * @category Large Neighborhood Search
+     */
+    lnsMode?: "Robust" | "Focused";
     /** @internal */
     _lnsInitNoOverlapPropagationLevel?: number;
     /** @internal */
@@ -3473,15 +3576,29 @@ export type WorkerParameters = {
     /** @internal */
     _lnsApplyCutProbability?: number;
     /** @internal */
+    _lnsSkipNoImprovementProbability?: number;
+    /** @internal */
     _lnsSmallStructureLimit?: number;
     /** @internal */
     _lnsResourceOptimization?: boolean;
+    /** @internal */
+    _lnsAbsentCoreWeight?: number;
+    /** @internal */
+    _arcWeightAbsentOverride?: number;
+    /** @internal */
+    _arcWeightAlternativeChosen?: number;
+    /** @internal */
+    _arcWeightAlternativeNotChosen?: number;
+    /** @internal */
+    _arcWeightTouchingPOS?: number;
     /** @internal */
     _lnsRestoreAbsentIntervals?: boolean;
     /** @internal */
     _lnsRestoreIntervalLengths?: boolean;
     /** @internal */
     _lnsRestoreIntVarValues?: boolean;
+    /** @internal */
+    _lnsAlwaysRelaxObjective?: boolean;
     /**
      * Use only the user-provided warm start as the initial solution in LNS
      *
@@ -3542,7 +3659,7 @@ export type WorkerParameters = {
     /** @internal */
     _lnsFDS?: boolean;
     /** @internal */
-    _lnsFreezeIntervalsBeforeFragment?: boolean;
+    _lnsFragmentFreezing?: "Off" | "BeforeOnly" | "On" | "Unsafe";
     /** @internal */
     _lnsRelaxSlack?: number;
     /** @internal */
@@ -3631,9 +3748,19 @@ export type WorkerParameters = {
     /** @internal */
     _setTimesDensityReliabilityThreshold?: number;
     /** @internal */
+    _lnsDisabledHeuristics?: number;
+    /** @internal */
     _setTimesNbExtendsFactor?: number;
     /** @internal */
     _discreteLowCapacityLimit?: number;
+    /** @internal */
+    _presolveCumulRule1?: boolean;
+    /** @internal */
+    _presolveCumulRule2?: boolean;
+    /** @internal */
+    _presolveCumulRule3?: boolean;
+    /** @internal */
+    _presolveCumulRule4MaxDemands?: number;
     /** @internal */
     _lnsTrainingObjectiveLimit?: number;
     /** @internal */
@@ -3648,8 +3775,12 @@ export type WorkerParameters = {
     _timeNetVarsToPreprocess?: number;
     /** @internal */
     _timeNetSubPriorityBits?: number;
+    /** @internal */
+    _minChainLength?: number;
 };
 /**
+ * Parameters specify how the solver should behave.
+ *
  * @remarks
  * Parameters specify how the solver should behave.  For example, the
  * number of workers (threads) to use, the time limit, etc.
@@ -3707,7 +3838,7 @@ export type WorkerParameters = {
  *   nbWorkers: 4,        // Use 4 threads
  *   // The first two workers will use FDS search.
  *   // The remaining two workers will use the defaults, i.e., LNS search with default propagation levels.
- *   workers = [fdsWorker, fdsWorker];
+ *   workers: [fdsWorker, fdsWorker],
  * };
  * let result = await myModel.solve(params);
  * ```
@@ -3875,13 +4006,14 @@ export type Parameters = {
      *
      * - `Default`: Balanced configuration for most problems. Uses maximum propagation levels and distributes workers across different search strategies: half use LNS, 3/8 use FDS, and the rest use FDSDual. This provides a good mix of exploration and exploitation.
      *
-     * - `Large`: Optimized for big problems with more than 100,000 variables. Uses minimum propagation to reduce overhead, and all workers use LNS search. This trades propagation strength for scalability.
+     * - `Large`: Optimized for big problems with more than 100,000 variables. Uses minimum propagation to reduce overhead, all workers use LNS search, and {@link Parameters.lnsMode} is set to `Focused`. This trades propagation strength for scalability.
      *
      * **Parameters affected by presets:**
      *
      * The preset sets default values for the following parameters:
      *
      * - {@link Parameters.searchType}: How workers are distributed across LNS, FDS, and FDSDual
+     * - {@link Parameters.lnsMode}: LNS solution pool strategy (`Large` preset selects `Focused`)
      * - {@link Parameters.noOverlapPropagationLevel}: Propagation strength for noOverlap constraints
      * - {@link Parameters.cumulPropagationLevel}: Propagation strength for cumulative constraints
      *
@@ -4194,8 +4326,6 @@ export type Parameters = {
      * @category Gap Tolerance
      */
     relativeGapTolerance?: number;
-    /** @internal */
-    _tagsFromNames?: "Never" | "Auto" | "Merge" | "Force";
     /**
      * How much to propagate noOverlap constraints
      *
@@ -4875,6 +5005,47 @@ export type Parameters = {
      * @category Failure-Directed Search
      */
     fdsDualResetRatings?: boolean;
+    /**
+     * LNS solution pool strategy.
+     *
+     * @remarks
+     * Controls how LNS manages its solution pool.
+     *
+     * - `Robust`: Maintain multiple solution tiers for diverse exploration (the default).
+     *   The solver keeps several solutions of varying quality and occasionally works on
+     *   improving worse solutions. This provides robustness against getting stuck in
+     *   local optima.
+     *
+     * - `Focused`: Concentrate all LNS effort on improving the best solution.
+     *   Secondary solution tiers are disabled, reducing memory and CPU overhead.
+     *   Recommended for large problems where maintaining multiple solutions is too
+     *   expensive.
+     *
+     * The `Large` {@link Parameters.preset} automatically selects `Focused` mode. If you
+     * explicitly set `lnsMode`, your value takes precedence over the preset.
+     *
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * let model = new CP.Model();
+     * // ... build your model ...
+     *
+     * // Default: robust mode with multiple solution tiers
+     * let result = await model.solve();
+     *
+     * // Focused mode for large problems
+     * result = await model.solve({ lnsMode: "Focused" });
+     *
+     * // Or use the Large preset, which enables Focused mode automatically
+     * result = await model.solve({ preset: "Large" });
+     * ```
+     *
+     * @see {@link Parameters.preset} for automatic configuration based on problem size.
+     * @see {@link Parameters.searchType} for choosing the search algorithm.
+     *
+     * @category Large Neighborhood Search
+     */
+    lnsMode?: "Robust" | "Focused";
     /** @internal */
     _lnsInitNoOverlapPropagationLevel?: number;
     /** @internal */
@@ -4906,15 +5077,29 @@ export type Parameters = {
     /** @internal */
     _lnsApplyCutProbability?: number;
     /** @internal */
+    _lnsSkipNoImprovementProbability?: number;
+    /** @internal */
     _lnsSmallStructureLimit?: number;
     /** @internal */
     _lnsResourceOptimization?: boolean;
+    /** @internal */
+    _lnsAbsentCoreWeight?: number;
+    /** @internal */
+    _arcWeightAbsentOverride?: number;
+    /** @internal */
+    _arcWeightAlternativeChosen?: number;
+    /** @internal */
+    _arcWeightAlternativeNotChosen?: number;
+    /** @internal */
+    _arcWeightTouchingPOS?: number;
     /** @internal */
     _lnsRestoreAbsentIntervals?: boolean;
     /** @internal */
     _lnsRestoreIntervalLengths?: boolean;
     /** @internal */
     _lnsRestoreIntVarValues?: boolean;
+    /** @internal */
+    _lnsAlwaysRelaxObjective?: boolean;
     /**
      * Use only the user-provided warm start as the initial solution in LNS
      *
@@ -4975,7 +5160,7 @@ export type Parameters = {
     /** @internal */
     _lnsFDS?: boolean;
     /** @internal */
-    _lnsFreezeIntervalsBeforeFragment?: boolean;
+    _lnsFragmentFreezing?: "Off" | "BeforeOnly" | "On" | "Unsafe";
     /** @internal */
     _lnsRelaxSlack?: number;
     /** @internal */
@@ -5066,9 +5251,19 @@ export type Parameters = {
     /** @internal */
     _setTimesDensityReliabilityThreshold?: number;
     /** @internal */
+    _lnsDisabledHeuristics?: number;
+    /** @internal */
     _setTimesNbExtendsFactor?: number;
     /** @internal */
     _discreteLowCapacityLimit?: number;
+    /** @internal */
+    _presolveCumulRule1?: boolean;
+    /** @internal */
+    _presolveCumulRule2?: boolean;
+    /** @internal */
+    _presolveCumulRule3?: boolean;
+    /** @internal */
+    _presolveCumulRule4MaxDemands?: number;
     /** @internal */
     _lnsTrainingObjectiveLimit?: number;
     /** @internal */
@@ -5083,6 +5278,12 @@ export type Parameters = {
     _timeNetVarsToPreprocess?: number;
     /** @internal */
     _timeNetSubPriorityBits?: number;
+    /** @internal */
+    _minChainLength?: number;
+    /** @internal */
+    _monitorInterval?: number;
+    /** @internal */
+    _monitorThreshold?: number;
 };
 /**
  * Creates a deep copy of the input Parameters object.
@@ -5166,34 +5367,6 @@ export declare const ParametersHelp: string;
  * If `--help` or `-h` is given, the function prints help starting with the `usage`
  * option (if provided), followed by the list of recognized parameters:
  *
- * ```text
- * Help:
- *   --help, -h                       Print this help
- *   --optalcpVersion                 Print OptalCP version information
- *
- * Solver path:
- *   --solverPath string              Path to the solver
- *
- * Terminal output:
- *   --color Never|Auto|Always        Whether to colorize output to the terminal
- *
- * Major options:
- *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSDual|SetTimes
- *                                    Type of search to use
- *   --randomSeed uint32              Random seed
- *   --logLevel uint32                Level of the log
- *   --warningLevel uint32            Level of warnings
- *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, the correctness of solutions is verified
- *
- * Limits:
- *   --timeLimit double               Wall clock limit for execution
- *   --solutionLimit uint64           Stop the search after the given number of solutions
- *
- * ...
- * ```
- *
  * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
  *
  * - `--workerN.` or `--workersN.` for worker `N`
@@ -5262,34 +5435,6 @@ export declare function parseParameters(params?: Parameters, args?: string[]): P
  * If `--help` or `-h` is given, the function prints help starting with the `usage`
  * option (if provided), followed by the list of recognized parameters:
  *
- * ```text
- * Help:
- *   --help, -h                       Print this help
- *   --optalcpVersion                 Print OptalCP version information
- *
- * Solver path:
- *   --solverPath string              Path to the solver
- *
- * Terminal output:
- *   --color Never|Auto|Always        Whether to colorize output to the terminal
- *
- * Major options:
- *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSDual|SetTimes
- *                                    Type of search to use
- *   --randomSeed uint32              Random seed
- *   --logLevel uint32                Level of the log
- *   --warningLevel uint32            Level of warnings
- *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, the correctness of solutions is verified
- *
- * Limits:
- *   --timeLimit double               Wall clock limit for execution
- *   --solutionLimit uint64           Stop the search after the given number of solutions
- *
- * ...
- * ```
- *
  * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
  * For example, `--worker0.searchType FDS` sets the search type for the first worker only.
  *
@@ -5349,6 +5494,8 @@ type SerializedSolution = {
     objective: ObjectiveValue;
 };
 /**
+ * An event emitted when the solver finds a solution.
+ *
  * @remarks
  * An event emitted by {@link Solver} when a solution is found.
  *
@@ -5438,6 +5585,8 @@ export type ObjectiveBoundEntry = {
     value: ObjectiveValue;
 };
 /**
+ * Access to variable values after solving.
+ *
  * @remarks
  * Solution of a {@link Model}. When a model is solved, the solution is stored
  * in this object. The solution contains values of all variables in the model
@@ -5474,6 +5623,7 @@ export declare class Solution {
      * // Create an external solution
      * const solution = new CP.Solution();
      * solution.setValue(x, 0, 10);  // x starts at 0, ends at 10
+     * solution.setObjective(10);    // objective value = x.end() = 10
      *
      * // Use it as a warm start
      * const result = await model.solve({ timeLimit: 60 }, solution);
@@ -5799,6 +5949,8 @@ export declare class ModelDomains {
     getLengthMax(v: IntervalVar): number | null;
 }
 /**
+ * Central class for building optimization models. Creates variables, constraints, and objectives.
+ *
  * @remarks
  * _Model_ captures the problem to be solved. It contains variables,
  * constraints and objective function.
@@ -6033,7 +6185,7 @@ export declare class Model {
     /**
      * Negation of the boolean expression `arg`.
      *
-     * @param arg The boolean expression to negate.
+     * @param arg The argument to negate ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6046,8 +6198,8 @@ export declare class Model {
     /**
      * Logical _OR_ of boolean expressions `lhs` and `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6060,8 +6212,8 @@ export declare class Model {
     /**
      * Logical _AND_ of boolean expressions `lhs` and `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6074,8 +6226,8 @@ export declare class Model {
     /**
      * Logical implication of two boolean expressions, that is `lhs` implies `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6094,7 +6246,7 @@ export declare class Model {
     /**
      * Creates an expression that replaces value *absent* by a constant.
      *
-     * @param arg The integer expression to guard.
+     * @param arg The argument to guard ({@link IntExpr} or `int`).
      * @param absentValue The value to use when the expression is absent.
      *
      * @returns The resulting integer expression
@@ -6145,8 +6297,8 @@ export declare class Model {
     /**
      * Constrains `lhs` and `rhs` to be identical, including their presence status.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The identity constraint.
      *
@@ -6223,7 +6375,7 @@ export declare class Model {
     /**
      * Creates Boolean expression `lb` &le; `arg` &le; `ub`.
      *
-     * @param arg The integer expression to check.
+     * @param arg The argument to check ({@link IntExpr} or `int`).
      * @param lb The lower bound of the range.
      * @param ub The upper bound of the range.
      *
@@ -6242,7 +6394,7 @@ export declare class Model {
     /**
      * Creates an integer expression which is absolute value of `arg`.
      *
-     * @param arg The integer expression.
+     * @param arg The argument ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -6255,8 +6407,8 @@ export declare class Model {
     /**
      * Creates an integer expression which is the minimum of `lhs` and `rhs`.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -6269,8 +6421,8 @@ export declare class Model {
     /**
      * Creates an integer expression which is the maximum of `lhs` and `rhs`.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -6476,7 +6628,7 @@ export declare class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] ≤ row[1] ≤ row[2] lexicographically
@@ -6516,7 +6668,7 @@ export declare class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] < row[1] < row[2] lexicographically
@@ -6558,7 +6710,7 @@ export declare class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] ≥ row[1] ≥ row[2] lexicographically
@@ -6598,7 +6750,7 @@ export declare class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] > row[1] > row[2] lexicographically
@@ -7059,6 +7211,10 @@ export declare class Model {
     span(main: IntervalVar, covered: IntervalVar[]): Constraint;
     /** @internal */
     _noOverlap(sequence: SequenceVar, transitions?: number[][]): Constraint;
+    /** @internal */
+    _selectiveDisjunction(intervals: IntervalVar[], types: number[], transitions?: number[][]): Constraint;
+    /** @internal */
+    _alwaysEqual(func: StateFunction, interval: IntervalVar, value: number): Constraint;
     /**
      * Creates an expression equal to the position of the `interval` on the `sequence`.
      *
@@ -7127,7 +7283,7 @@ export declare class Model {
      *   { length: 10, demand: 1},
      * ];
      *
-     * let model = new CP.Model;
+     * let model = new CP.Model();
      * // A set of pulses, one for each task:
      * let pulses: CP.CumulExpr[] = [];
      * // End times of the tasks:
@@ -7159,7 +7315,7 @@ export declare class Model {
      * If the task `z` is absent, then the variable `wz` has no meaning, and therefore, it should also be absent.
      *
      * ```ts
-     * let model = CP.Model;
+     * let model = new CP.Model();
      * let x = model.intervalVar({ name: "x" });
      * let y = model.intervalVar({ name: "y" });
      * let z = model.intervalVar({ name: "z", optional: true });
@@ -7438,9 +7594,7 @@ export declare class Model {
      * @remarks
      * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
      *
-     * ## Example
-     *
-     * A production task that cannot overlap with scheduled maintenance windows:
+     * @example A production task that cannot overlap with scheduled maintenance windows:
      *
      * ```ts
      * import * as CP from "optalcp";
@@ -7487,9 +7641,33 @@ export declare class Model {
      *
      * I.e., the function value at the start of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A factory task that can only start during work hours (excluding breaks):
      *
-     * A factory task that can only start during work hours (excluding breaks):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 2-hour task on a machine
+     * const task = model.intervalVar({ length: 2, name: "task" });
+     *
+     * // Allowed start times: 1 = allowed, 0 = forbidden
+     * // Morning shift 6-14h, but break at 10-11h when no new task can start
+     * const allowedStarts = model.stepFunction([
+     *     [0, 0],   // Before 6h: forbidden
+     *     [6, 1],   // 6h: shift starts, allowed
+     *     [10, 0],  // 10h: break, forbidden
+     *     [11, 1],  // 11h: break ends, allowed
+     *     [14, 0],  // 14h: shift ends, forbidden
+     * ]);
+     *
+     * // Task cannot start when allowedStarts is 0
+     * model.forbidStart(task, allowedStarts);
+     * model.minimize(task.start());
+     *
+     * const result = await model.solve();
+     * // Task starts at 6 (earliest allowed start time)
+     * ```
      *
      * @see {@link IntervalVar.forbidStart} for the equivalent function on {@link IntervalVar}.
      * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -7513,9 +7691,33 @@ export declare class Model {
      *
      * I.e., the function value at the end of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A delivery task that must complete during business hours (not during lunch break):
      *
-     * A delivery task that must complete during business hours (not during lunch break):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 1-hour delivery task
+     * const delivery = model.intervalVar({ length: 1, name: "delivery" });
+     *
+     * // Allowed end times: 1 = allowed, 0 = forbidden
+     * // Business hours 9-17h, but deliveries cannot end during lunch 12-13h
+     * const allowedEnds = model.stepFunction([
+     *     [0, 0],   // Before 9h: forbidden
+     *     [9, 1],   // 9h: business opens, allowed
+     *     [12, 0],  // 12h: lunch break, forbidden
+     *     [13, 1],  // 13h: lunch ends, allowed
+     *     [17, 0],  // 17h: business closes, forbidden
+     * ]);
+     *
+     * // Delivery cannot end when allowedEnds is 0
+     * model.forbidEnd(delivery, allowedEnds);
+     * model.minimize(delivery.end());
+     *
+     * const result = await model.solve();
+     * // Delivery ends at 9 (starts at 8, ends at earliest allowed time)
+     * ```
      *
      * @see {@link IntervalVar.forbidEnd} for the equivalent function on {@link IntervalVar}.
      * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -7681,7 +7883,7 @@ export declare class Model {
      * import * as CP from "optalcp";
      *
      * // Set name in constructor
-     * let model = new CP.Model({ name: "MySchedulingProblem" });
+     * let model = new CP.Model("MySchedulingProblem");
      * console.log(model.name);  // "MySchedulingProblem"
      *
      * // Or set name later
@@ -7766,8 +7968,8 @@ export declare class Model {
      *
      * ```ts
      * const model = new CP.Model();
-     * const x = model.intVar(0, 100, "x");
-     * const y = model.intVar(0, 100, "y");
+     * const x = model.intVar({ min: 0, max: 100, name: "x" });
+     * const y = model.intVar({ min: 0, max: 100, name: "y" });
      *
      * // Enforce various boolean expressions
      * model.enforce([
@@ -8137,26 +8339,7 @@ export declare class Model {
      * Same as {@link IntExpr.plus}.
      */
     plus(lhs: IntExpr | number, rhs: IntExpr | number): IntExpr;
-    /**
-     * Addition of two cumulative expressions.
-     *
-     * @param lhs The left-hand side cumulative expression.
-     * @param rhs The right-hand side cumulative expression.
-     *
-     * @returns The resulting cumulative expression
-     *
-     * @remarks
-     * Computes addition of two cumulative functions.
-     *
-     * ### Formal definition
-     *
-     * Let `result = plus(lhs, rhs)`. Then for any number `x` in range {@link IntervalMin}..{@link IntervalMax} the value of `result` at `x` is equal to `lhs` at `x` plus `rhs` at `x`.
-     *
-     * `plus(lhs, rhs)` is the same as `sum([lhs, rhs])`.
-     *
-     * @see {@link CumulExpr.plus} for the equivalent function on {@link CumulExpr}.
-     * @see {@link Model.sum}, {@link Model.minus}, {@link Model.neg} for other ways to combine cumulative functions.
-     */
+    /** @internal */
     plus(lhs: CumulExpr, rhs: CumulExpr): CumulExpr;
     /**
      * Creates a subtraction of the two integer expressions, i.e. `lhs - rhs`.
@@ -8172,26 +8355,7 @@ export declare class Model {
      * Same as {@link IntExpr.minus}.
      */
     minus(lhs: IntExpr | number, rhs: IntExpr | number): IntExpr;
-    /**
-     * Subtraction of two cumulative expressions.
-     *
-     * @param lhs The left-hand side cumulative expression.
-     * @param rhs The right-hand side cumulative expression.
-     *
-     * @returns The resulting cumulative expression
-     *
-     * @remarks
-     * Computes subtraction of two cumulative functions.
-     *
-     * ### Formal definition
-     *
-     * Let `result = minus(lhs, rhs)`. Then for any number `x` in range {@link IntervalMin}..{@link IntervalMax} the value of `result` at `x` is equal to `lhs` at `x` minus `rhs` at `x`.
-     *
-     * `minus(lhs, rhs)` is the same as `sum([lhs, neg(rhs)])`.
-     *
-     * @see {@link CumulExpr.minus} for the equivalent function on {@link CumulExpr}.
-     * @see {@link Model.sum}, {@link Model.plus}, {@link Model.neg} for other ways to combine cumulative functions.
-     */
+    /** @internal */
     minus(lhs: CumulExpr, rhs: CumulExpr): CumulExpr;
     /**
      * Creates Boolean expression `lhs` &le; `rhs`.
@@ -8209,29 +8373,7 @@ export declare class Model {
      * Same as {@link IntExpr.le}.
      */
     le(lhs: IntExpr | number, rhs: IntExpr | number): BoolExpr;
-    /**
-     * Constrains cumulative function `cumul` to be everywhere less or equal to `maxCapacity`.
-     *
-     * @param cumul The cumulative expression.
-     * @param maxCapacity The maximum capacity value, which can be a constant or an expression.
-     *
-     * @returns The constraint object
-     *
-     * @remarks
-     * This function can be used to specify the maximum limit of resource usage at any time. For example, to limit the number of workers working simultaneously, limit the maximum amount of material on stock, etc.
-     *
-     * The `maxCapacity` can be a constant value or an expression. When an expression is used (such as an {@link IntVar}), the capacity becomes variable and is determined during the search.
-     *
-     * **Limitations:**
-     *
-     * - Variable capacity is only supported for discrete resources (pulses). Reservoir resources (steps) require a constant capacity.
-     * - The capacity expression must not be optional or absent.
-     *
-     * See {@link Model.pulse} for an example with `le`.
-     *
-     * @see {@link CumulExpr.le} for the equivalent function on {@link CumulExpr}.
-     * @see {@link Model.ge} for the opposite constraint.
-     */
+    /** @internal */
     le(cumul: CumulExpr, maxCapacity: IntExpr | number): Constraint;
     /**
      * Creates Boolean expression `lhs` &ge; `rhs`.
@@ -8249,38 +8391,9 @@ export declare class Model {
      * Same as {@link IntExpr.ge}.
      */
     ge(lhs: IntExpr | number, rhs: IntExpr | number): BoolExpr;
-    /**
-     * Constrains cumulative function `cumul` to be everywhere greater or equal to `minCapacity`.
-     *
-     * @param cumul The cumulative expression.
-     * @param minCapacity The minimum capacity value.
-     *
-     * @returns The constraint object
-     *
-     * @remarks
-     * This function can be used to specify the minimum limit of resource usage at any time. For example to make sure that there is never less than zero material on stock.
-     * See {@link Model.stepAtStart} for an example with `ge`.
-     *
-     * @see {@link CumulExpr.ge} for the equivalent function on {@link CumulExpr}.
-     * @see {@link Model.le} for the opposite constraint.
-     */
+    /** @internal */
     ge(cumul: CumulExpr, minCapacity: number): Constraint;
-    /**
-     * Constrains cumulative function to be at most `maxCapacity` (reversed parameter order).
-     *
-     * @param maxCapacity The maximum capacity value, which can be a constant or an expression.
-     * @param cumul The cumulative expression.
-     *
-     * @returns The constraint object
-     *
-     * @remarks
-     * Reversed parameter order for `model.ge(capacity, cumul)`. Equivalent to `model.le(cumul, capacity)`.
-     *
-     * This allows writing `capacity >= cumul` in a natural order.
-     *
-     * @see {@link Model.le} for the standard parameter order.
-     * @see {@link CumulExpr.le} for the fluent API.
-     */
+    /** @internal */
     ge(maxCapacity: IntExpr | number, cumul: CumulExpr): Constraint;
     /**
      * Creates negation of the integer expression, i.e. `-arg`.
@@ -8295,20 +8408,7 @@ export declare class Model {
      * Same as {@link IntExpr.neg}.
      */
     neg(arg: IntExpr | number): IntExpr;
-    /**
-     * Negation of a cumulative expression.
-     *
-     * @param arg The cumulative expression.
-     *
-     * @returns The resulting cumulative expression
-     *
-     * @remarks
-     * Computes negation of a cumulative function. That is, the resulting function has the opposite values.
-     *
-     * @see {@link CumulExpr.neg} for the equivalent function on {@link CumulExpr}.
-     *
-     * @see {@link Model.sum}, {@link Model.plus}, {@link Model.minus} for other ways to combine cumulative functions.
-     */
+    /** @internal */
     neg(arg: CumulExpr): CumulExpr;
     /** @internal @deprecated Use `Model.presence` instead. */
     presenceOf(arg: IntExpr | number | boolean | IntervalVar): BoolExpr;
@@ -8422,6 +8522,8 @@ export declare class Model {
      */
     stepFunction(values: number[][]): IntStepFunction;
     /** @internal */
+    stateFunction(transitions?: number[][]): StateFunction;
+    /** @internal */
     getPrimaryObjectiveExpression(): IntExpr | number | undefined;
     /** @internal */
     _toObject(params?: Parameters, warmStart?: Solution): {
@@ -8503,8 +8605,8 @@ export declare class Model {
      * import * as CP from "optalcp";
      *
      * const model = new CP.Model();
-     * const useMachineA = model.boolVar("use_machine_a");
-     * const useMachineB = model.boolVar("use_machine_b");
+     * const useMachineA = model.boolVar({ name: "use_machine_a" });
+     * const useMachineB = model.boolVar({ name: "use_machine_b" });
      *
      * const boolVars = model.getBoolVars();
      * console.log(boolVars.length);  // 2
@@ -8531,8 +8633,8 @@ export declare class Model {
      * import * as CP from "optalcp";
      *
      * const model = new CP.Model();
-     * const x = model.intVar(0, 10, "x");
-     * const y = model.intVar(0, 100, "y");
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 100, name: "y" });
      *
      * const intVars = model.getIntVars();
      * console.log(intVars.length);  // 2
@@ -8713,15 +8815,15 @@ export declare class Model {
      * // Later, load from file
      * const loadedJson = fs.readFileSync("model.json", "utf-8");
      *
-     * // Restore model (returns Model directly in TypeScript)
-     * const model2 = CP.Model.fromJSON(loadedJson);
+     * // Restore model, parameters, and warm start
+     * const { model: model2, parameters: params2, warmStart: warmStart2 } = CP.Model.fromJSON(loadedJson);
      *
      * // Access variables
      * const intervalVars = model2.getIntervalVars();
      * console.log(`Loaded model with ${intervalVars.length} interval variables`);
      *
      * // Solve with restored parameters
-     * const result = await model2.solve(params);
+     * const result = await model2.solve(params2);
      * ```
      *
      * @see {@link Model.toJSON} to export to JSON.
@@ -8833,6 +8935,8 @@ export declare class Model {
  */
 export type SolverCommand = "solve" | "propagate" | "toText" | "toJS";
 /**
+ * Async solver with event callbacks for solutions, bounds, and log messages.
+ *
  * @remarks
  * The solver provides asynchronous communication with the solver.
  *
@@ -9194,9 +9298,10 @@ export declare class Solver {
      *
      * @remarks
      * This method only initiates the stop; it returns immediately without waiting
-     * for the solver to actually stop. The solver will stop as soon as possible and
-     * will send a summary event. However, other events may be sent
-     * before the summary event (e.g., another solution found or a log message).
+     * for the solver to actually stop. Because the solver runs asynchronously,
+     * more events (such as additional solutions or log messages) may still arrive
+     * after `stop` is called. The solver will stop as soon as possible, but the
+     * exact timing depends on what it is currently doing.
      *
      * Requesting a stop on a solver that has already stopped has no effect.
      *
@@ -9205,19 +9310,19 @@ export declare class Solver {
      * In the following example, we issue a stop command 1 minute after the first
      * solution is found.
      * ```ts
-     * let solver = new CP.Solver;
-     * timerStarted = false;
-     * solver.on('solution', (_: SolutionEvent) => {
+     * let solver = new CP.Solver();
+     * let timerStarted = false;
+     * solver.onSolution = (_: CP.SolutionEvent) => {
      *   // We just found a solution. Set a timeout if there isn't any.
-     *  if (!timerStarted) {
-     *    timerStarted = true;
+     *   if (!timerStarted) {
+     *     timerStarted = true;
      *     // Register a function to be called after 60 seconds:
-     *    setTimeout(() => {
-     *      console.log("Requesting solver to stop");
-     *      solver.stop("Stop because I said so!");
-     *    }, 60); // The timeout is 60 seconds
-     *  }
-     * });
+     *     setTimeout(() => {
+     *       console.log("Requesting solver to stop");
+     *       solver.stop("Stop because I said so!");
+     *     }, 60000); // The timeout is 60 seconds
+     *   }
+     * };
      * let result = await solver.solve(model, { timeLimit: 300 });
      * ```
      */
@@ -9332,6 +9437,8 @@ export type ObjectiveEntry = {
     valid?: undefined | true;
 };
 /**
+ * Holds the solution, objective, statistics, and solve status after solving.
+ *
  * @remarks
  * The result returned by {@link Model.solve} or {@link Solver.solve}.
  *
@@ -10042,46 +10149,6 @@ export declare const BenchmarkParametersHelp: string;
  * and then terminates the program.
  *
  * The description of supported parameters looks like this:
- * ```text
- * Benchmarking options:
- *   --nbSeeds uint32        Test models on the given number of random seeds
- *   --nbParallelRuns uint32 Run given number of solves in parallel
- *   --minObjective double   Require given minimum objective value
- *   --maxObjective double   Require given maximum objective value
- *   --dontSolve             Not really solve. Useful, e.g., with --exportJSON
- *
- * Overall benchmarking output:
- *   --output fileName      Write detailed results of all runs into a JSON file
- *   --summary fileName     Write a summary table of all runs into a CSV file
- *   --dontOutputSolutions  Do not write solutions into the output file (save space)
- *
- * Outputs for individual benchmarking runs:
- *   --result fileNamePattern         Write a detailed result into a JSON file
- *   --log fileNamePattern            Write log into the specified text file
- *   --exportJSON fileNamePattern     Export problem into a JSON file
- *   --exportTxt fileNamePattern      Export problem into a text file
- * Where fileNamePattern undergoes the following expansion:
- *   {name}       ->  Model name (by convention name of the source data file)
- *   {flat_name}  ->  Like {name} but all characters '/' is replaced by '_'
- *   {seed}       ->  Random seed
- * Solver path:
- *   --solverPath string              Path to the solver
- *
- * Terminal output:
- *   --color Never|Auto|Always        Whether to colorize output to the terminal
- *
- * Major options:
- *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSDual|SetTimes
- *                                    Type of search to use
- *   --randomSeed uint32              Random seed
- *   --logLevel uint32                Level of the log
- *   --warningLevel uint32            Level of warnings
- *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, the correctness of solutions is verified
- *
- * ...
- * ```
  *
  * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
  *

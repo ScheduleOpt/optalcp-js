@@ -11,12 +11,13 @@ import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 // The following typedoc comment is for constant Version that is added by generate_ts:
 /**
  * The version of the module, such as "1.0.0".
  * @category Constants
  */
-export const Version = "2026.2.0";
+export const Version = "2026.4.0";
 // === Compilation options ===================================================
 // Compilation options could be replaced by constants during bundling.
 const TYPE_CHECK_LEVEL = 2; // 0: test nothing, 1: test only integers (for ts), 2: test everything (for js)
@@ -302,6 +303,8 @@ class WebSocketSolverConnection {
 }
 // === Model nodes ===========================================================
 /**
+ * The base class for all modeling objects.
+ *
  * @remarks
  * The base class for all modeling objects.
  *
@@ -556,7 +559,7 @@ export class FloatExpr extends ModelElement {
     }
 }
 /**
- * A class representing an integer expression in the model.
+ * Integer expression, e.g. an arithmetic combination of variables and constants.
  *
  * @remarks
  * The expression may depend on the value of a variable (or variables), so the
@@ -833,7 +836,7 @@ export class IntExpr extends FloatExpr {
     /**
      * Constrains two expressions to be identical, including their presence status.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The constraint object
      *
@@ -1089,7 +1092,7 @@ export class IntExpr extends FloatExpr {
     /**
      * Creates an integer expression which is the minimum of the expression and `arg`.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -1105,7 +1108,7 @@ export class IntExpr extends FloatExpr {
     /**
      * Creates an integer expression which is the maximum of the expression and `arg`.
      *
-     * @param rhs The second integer expression.
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -1125,6 +1128,8 @@ export class IntExpr extends FloatExpr {
     }
 }
 /**
+ * Boolean expression, e.g. a comparison or a logical combination of other expressions.
+ *
  * @remarks
  * A class that represents a boolean expression in the model.
  * The expression may depend on one or more variables; therefore, its value
@@ -1138,6 +1143,7 @@ export class IntExpr extends FloatExpr {
  * the start of `y`:
  *
  * See {@link IntExpr.le} for the comparison method.
+ *
  * ```ts
  * let model = new CP.Model();
  * let x = model.intervalVar({ length: 10, name: "x" });
@@ -1276,7 +1282,7 @@ export class BoolExpr extends IntExpr {
     /**
      * Returns logical _OR_ of the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -1292,7 +1298,7 @@ export class BoolExpr extends IntExpr {
     /**
      * Returns logical _AND_ of the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -1308,7 +1314,7 @@ export class BoolExpr extends IntExpr {
     /**
      * Returns implication between the expression and `arg`.
      *
-     * @param rhs The second boolean expression.
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -1377,6 +1383,8 @@ export class Objective extends ModelElement {
     }
 }
 /**
+ * Integer decision variable with a domain.
+ *
  * @remarks
  * Integer variable represents an unknown (integer) value that solver has to find.
  *
@@ -1400,7 +1408,7 @@ export class Objective extends ModelElement {
  * Each variable has a different range of possible values.
  *
  * ```ts
- * let model = CP.Model;
+ * let model = new CP.Model();
  * let x = model.intVar({ name: "x", range: [1, 3] });
  * let y = model.intVar({ name: "y", range: [0, 100] });
  * let z = model.intVar({ name: "z", range: [10, 20], optional: true });
@@ -1438,14 +1446,18 @@ export class IntVar extends IntExpr {
     /** @internal */
     _makeAuxiliary() { this._props.func = "_intVar"; }
     /**
-     * The presence status of the integer variable.
+     * Whether the integer variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the integer variable using a tri-state value:
+     * Gets or sets whether the integer variable is optional:
      *
      * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The variable is *present* - it must have a value in the solution.
-     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * To force a variable to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~model.presence(x))` (Python),
+     * `model.enforce(model.presence(x).not())` (TypeScript), or
+     * `model.Enforce(!model.Presence(x))` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -1467,23 +1479,14 @@ export class IntVar extends IntExpr {
      * // Make x optional
      * x.optional = true;
      * console.log(x.optional);  // true
-     *
-     * // Make y absent
-     * y.optional = null;
-     * console.log(y.optional);  // null
      * ```
      */
     get optional() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
-        if (this._props.status === 0 /* PresenceStatus.Optional */)
-            return true;
-        return false;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
+        return this._props.status === 0 /* PresenceStatus.Optional */;
     }
     set optional(value) {
-        if (value === null)
-            this._props.status = 2 /* PresenceStatus.Absent */;
-        else if (value)
+        if (value)
             this._props.status = 0 /* PresenceStatus.Optional */;
         else
             this._props.status = undefined;
@@ -1495,7 +1498,6 @@ export class IntVar extends IntExpr {
      * Gets or sets the minimum value of the integer variable's domain.
      *
      * The initial value is set during construction by {@link Model.intVar}.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1519,8 +1521,7 @@ export class IntVar extends IntExpr {
      * ```
      */
     get min() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? 0;
     }
     set min(value) { this._props.min = GetInt(value); }
@@ -1531,7 +1532,6 @@ export class IntVar extends IntExpr {
      * Gets or sets the maximum value of the integer variable's domain.
      *
      * The initial value is set during construction by {@link Model.intVar}.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1555,8 +1555,7 @@ export class IntVar extends IntExpr {
      * ```
      */
     get max() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? IntVarMax;
     }
     set max(value) { this._props.max = GetInt(value); }
@@ -1565,23 +1564,21 @@ export class IntVar extends IntExpr {
     /** @internal @deprecated Use `optional` property instead */
     isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
     /** @internal @deprecated Use `optional` property instead */
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    isAbsent() { return this.optional && this.min > this.max; }
     /** @internal @deprecated Use `min` property instead */
     getMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? 0;
     }
     /** @internal @deprecated Use `max` property instead */
     getMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? IntVarMax;
     }
     /** @internal @deprecated Use `optional` property instead */
     makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
     /** @internal @deprecated Use `optional` property instead */
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    makeAbsent() { this._props.status = 0 /* PresenceStatus.Optional */; this._props.min = IntVarMax; this._props.max = IntVarMin; }
     /** @internal @deprecated Use `optional` property instead */
     makePresent() { this._props.status = undefined; }
     /** @internal @deprecated Use `min` property instead */
@@ -1625,29 +1622,22 @@ export class FloatVar extends FloatExpr {
     /** @internal */
     _makeAuxiliary() { this._props.func = "_floatVar"; }
     get optional() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
-        if (this._props.status === 0 /* PresenceStatus.Optional */)
-            return true;
-        return false;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
+        return this._props.status === 0 /* PresenceStatus.Optional */;
     }
     set optional(value) {
-        if (value === null)
-            this._props.status = 2 /* PresenceStatus.Absent */;
-        else if (value)
+        if (value)
             this._props.status = 0 /* PresenceStatus.Optional */;
         else
             this._props.status = undefined;
     }
     get min() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? FloatVarMin;
     }
     set min(value) { this._props.min = GetFloat(value); }
     get max() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? FloatVarMax;
     }
     set max(value) { this._props.max = GetFloat(value); }
@@ -1656,23 +1646,21 @@ export class FloatVar extends FloatExpr {
     /** @internal @deprecated Use `optional` property instead */
     isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
     /** @internal @deprecated Use `optional` property instead */
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    isAbsent() { return this.optional && this.min > this.max; }
     /** @internal @deprecated Use `min` property instead */
     getMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? FloatVarMin;
     }
     /** @internal @deprecated Use `max` property instead */
     getMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? FloatVarMax;
     }
     /** @internal @deprecated Use `optional` property instead */
     makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
     /** @internal @deprecated Use `optional` property instead */
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    makeAbsent() { this._props.status = 0 /* PresenceStatus.Optional */; this._props.min = FloatVarMax; this._props.max = FloatVarMin; }
     /** @internal @deprecated Use `optional` property instead */
     makePresent() { this._props.status = undefined; }
     /** @internal @deprecated Use `min` property instead */
@@ -1686,6 +1674,8 @@ export class FloatVar extends FloatExpr {
     }
 }
 /**
+ * Boolean decision variable whose value is determined by the solver.
+ *
  * @remarks
  * Boolean variable represents an unknown truth value (`True` or `False`) that the solver must find.
  *
@@ -1795,14 +1785,18 @@ export class BoolVar extends BoolExpr {
     /** @internal */
     _makeAuxiliary() { this._props.func = "_boolVar"; }
     /**
-     * The presence status of the boolean variable.
+     * Whether the boolean variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the boolean variable using a tri-state value:
+     * Gets or sets whether the boolean variable is optional:
      *
      * - `True` / `true`: The variable is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The variable is *present* - it must have a value in the solution.
-     * - `None` / `null`: The variable is *absent* - it will be omitted from the solution.
+     *
+     * To force a variable to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~model.presence(x))` (Python),
+     * `model.enforce(model.presence(x).not())` (TypeScript), or
+     * `model.Enforce(!model.Presence(x))` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -1824,23 +1818,14 @@ export class BoolVar extends BoolExpr {
      * // Make x optional
      * x.optional = true;
      * console.log(x.optional);  // true
-     *
-     * // Make y absent
-     * y.optional = null;
-     * console.log(y.optional);  // null
      * ```
      */
     get optional() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
-        if (this._props.status === 0 /* PresenceStatus.Optional */)
-            return true;
-        return false;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
+        return this._props.status === 0 /* PresenceStatus.Optional */;
     }
     set optional(value) {
-        if (value === null)
-            this._props.status = 2 /* PresenceStatus.Absent */;
-        else if (value)
+        if (value)
             this._props.status = 0 /* PresenceStatus.Optional */;
         else
             this._props.status = undefined;
@@ -1853,7 +1838,6 @@ export class BoolVar extends BoolExpr {
      *
      * For a free (unconstrained) boolean variable, returns `False`.
      * If set to `True`, the variable is fixed to `True`.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1875,8 +1859,7 @@ export class BoolVar extends BoolExpr {
      * ```
      */
     get min() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? false;
     }
     set min(value) { this._props.min = value; }
@@ -1888,7 +1871,6 @@ export class BoolVar extends BoolExpr {
      *
      * For a free (unconstrained) boolean variable, returns `True`.
      * If set to `False`, the variable is fixed to `False`.
-     * If the variable is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the variable's domain in the model
      * (before the solve), not in the solution.
@@ -1910,8 +1892,7 @@ export class BoolVar extends BoolExpr {
      * ```
      */
     get max() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? true;
     }
     set max(value) { this._props.max = value; }
@@ -1920,23 +1901,21 @@ export class BoolVar extends BoolExpr {
     /** @internal @deprecated Use `optional` property instead */
     isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
     /** @internal @deprecated Use `optional` property instead */
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    isAbsent() { return this.optional && (this._props.min ?? 0) > (this._props.max ?? 1); }
     /** @internal @deprecated Use `min` property instead */
     getMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.min ?? false;
     }
     /** @internal @deprecated Use `max` property instead */
     getMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.max ?? true;
     }
     /** @internal @deprecated Use `optional` property instead */
     makeOptional() { this._props.status = 0 /* PresenceStatus.Optional */; }
     /** @internal @deprecated Use `optional` property instead */
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    makeAbsent() { this._props.status = 0 /* PresenceStatus.Optional */; this._props.min = 1; this._props.max = 0; }
     /** @internal @deprecated Use `optional` property instead */
     makePresent() { this._props.status = undefined; }
     /** @internal @deprecated Use `min` property instead */
@@ -1950,6 +1929,8 @@ export class BoolVar extends BoolExpr {
     }
 }
 /**
+ * Interval (task) variable for scheduling. Has start, end, length, and optional presence.
+ *
  * @remarks
  * Interval variable is a task, action, operation, or any other interval with a start
  * and an end. The start and the end of the interval are unknowns that the solver
@@ -2054,14 +2035,18 @@ export class IntervalVar extends ModelElement {
     /** @internal */
     _makeAuxiliary() { this._props.func = "_intervalVar"; }
     /**
-     * The presence status of the interval variable.
+     * Whether the interval variable is optional.
      *
      * @remarks
-     * Gets or sets the presence status of the interval variable using a tri-state value:
+     * Gets or sets whether the interval variable is optional:
      *
      * - `True` / `true`: The interval is *optional* - the solver decides whether it is present or absent in the solution.
      * - `False` / `false`: The interval is *present* - it must be scheduled in the solution.
-     * - `None` / `null`: The interval is *absent* - it will be omitted from the solution (and everything that depends on it).
+     *
+     * To force an interval to be absent, make it optional and constrain its presence
+     * to be false: `model.enforce(~x.presence())` (Python),
+     * `model.enforce(x.presence().not())` (TypeScript), or
+     * `model.Enforce(!x.Presence())` (C#).
      *
      * **Note:** This property reflects the presence status in the model
      * (before the solve), not in the solution.
@@ -2083,23 +2068,14 @@ export class IntervalVar extends ModelElement {
      * // Make task1 optional
      * task1.optional = true;
      * console.log(task1.optional);  // true
-     *
-     * // Make task2 absent
-     * task2.optional = null;
-     * console.log(task2.optional);  // null
      * ```
      */
     get optional() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
-        if (this._props.status === 0 /* PresenceStatus.Optional */)
-            return true;
-        return false;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
+        return this._props.status === 0 /* PresenceStatus.Optional */;
     }
     set optional(value) {
-        if (value === null)
-            this._props.status = 2 /* PresenceStatus.Absent */;
-        else if (value)
+        if (value)
             this._props.status = 0 /* PresenceStatus.Optional */;
         else
             this._props.status = undefined;
@@ -2111,7 +2087,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the minimum start time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2135,8 +2110,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get startMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.startMin ?? 0;
     }
     set startMin(value) { this._props.startMin = GetInt(value); }
@@ -2147,7 +2121,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the maximum start time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2169,8 +2142,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get startMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.startMax ?? IntervalMax;
     }
     set startMax(value) { this._props.startMax = GetInt(value); }
@@ -2181,7 +2153,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the minimum end time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2205,8 +2176,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get endMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.endMin ?? 0;
     }
     set endMin(value) { this._props.endMin = GetInt(value); }
@@ -2217,7 +2187,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the maximum end time of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2239,8 +2208,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get endMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.endMax ?? IntervalMax;
     }
     set endMax(value) { this._props.endMax = GetInt(value); }
@@ -2251,7 +2219,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the minimum length of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2275,8 +2242,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get lengthMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.lengthMin ?? 0;
     }
     set lengthMin(value) { this._props.lengthMin = GetInt(value); }
@@ -2287,7 +2253,6 @@ export class IntervalVar extends ModelElement {
      * Gets or sets the maximum length of the interval variable.
      *
      * The initial value is set during construction by {@link Model.intervalVar}.
-     * If the interval is absent, the getter returns `None`.
      *
      * **Note:** This property reflects the interval's domain in the model
      * (before the solve), not in the solution.
@@ -2311,8 +2276,7 @@ export class IntervalVar extends ModelElement {
      * ```
      */
     get lengthMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.lengthMax ?? LengthMax;
     }
     set lengthMax(value) { this._props.lengthMax = GetInt(value); }
@@ -2321,41 +2285,35 @@ export class IntervalVar extends ModelElement {
     /** @internal @deprecated Use `optional` property instead */
     isPresent() { return this._props.status === undefined || this._props.status === 1 /* PresenceStatus.Present */; }
     /** @internal @deprecated Use `optional` property instead */
-    isAbsent() { return this._props.status === 2 /* PresenceStatus.Absent */; }
+    isAbsent() { return this.optional && (this.startMin > this.startMax || this.endMin > this.endMax || this.lengthMin > this.lengthMax); }
     /** @internal @deprecated Use `startMin` property instead */
     getStartMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.startMin ?? 0;
     }
     /** @internal @deprecated Use `startMax` property instead */
     getStartMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.startMax ?? IntervalMax;
     }
     /** @internal @deprecated Use `endMin` property instead */
     getEndMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.endMin ?? 0;
     }
     /** @internal @deprecated Use `endMax` property instead */
     getEndMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.endMax ?? IntervalMax;
     }
     /** @internal @deprecated Use `lengthMin` property instead */
     getLengthMin() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.lengthMin ?? 0;
     }
     /** @internal @deprecated Use `lengthMax` property instead */
     getLengthMax() {
-        if (this._props.status === 2 /* PresenceStatus.Absent */)
-            return null;
+        assert(this._props.status !== 2 /* PresenceStatus.Absent */);
         return this._props.lengthMax ?? LengthMax;
     }
     /** @internal @deprecated Use `optional` property instead */
@@ -2363,7 +2321,7 @@ export class IntervalVar extends ModelElement {
     /** @internal @deprecated Use `optional` property instead */
     makePresent() { this._props.status = undefined; }
     /** @internal @deprecated Use `optional` property instead */
-    makeAbsent() { this._props.status = 2 /* PresenceStatus.Absent */; }
+    makeAbsent() { this._props.status = 0 /* PresenceStatus.Optional */; this._props.startMin = IntervalMax; this._props.startMax = IntervalMin; this._props.endMin = IntervalMax; this._props.endMax = IntervalMin; this._props.lengthMin = LengthMax; this._props.lengthMax = 0; }
     setStart(sMin, sMax) {
         this._props.startMin = GetInt(sMin);
         if (sMax === undefined)
@@ -2951,9 +2909,7 @@ export class IntervalVar extends ModelElement {
      * @remarks
      * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. I.e., if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
      *
-     * ## Example
-     *
-     * A production task that cannot overlap with scheduled maintenance windows:
+     * @example A production task that cannot overlap with scheduled maintenance windows:
      *
      * ```ts
      * import * as CP from "optalcp";
@@ -3002,9 +2958,33 @@ export class IntervalVar extends ModelElement {
      *
      * I.e., the function value at the start of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A factory task that can only start during work hours (excluding breaks):
      *
-     * A factory task that can only start during work hours (excluding breaks):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 2-hour task on a machine
+     * const task = model.intervalVar({ length: 2, name: "task" });
+     *
+     * // Allowed start times: 1 = allowed, 0 = forbidden
+     * // Morning shift 6-14h, but break at 10-11h when no new task can start
+     * const allowedStarts = model.stepFunction([
+     *     [0, 0],   // Before 6h: forbidden
+     *     [6, 1],   // 6h: shift starts, allowed
+     *     [10, 0],  // 10h: break, forbidden
+     *     [11, 1],  // 11h: break ends, allowed
+     *     [14, 0],  // 14h: shift ends, forbidden
+     * ]);
+     *
+     * // Task cannot start when allowedStarts is 0
+     * task.forbidStart(allowedStarts);
+     * model.minimize(task.start());
+     *
+     * const result = await model.solve();
+     * // Task starts at 6 (earliest allowed start time)
+     * ```
      *
      * @see {@link Model.forbidStart} for the equivalent function on {@link Model}.
      * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -3030,9 +3010,32 @@ export class IntervalVar extends ModelElement {
      *
      * I.e., the function value at the end of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A delivery task that must complete during business hours (not during lunch break):
      *
-     * A delivery task that must complete during business hours (not during lunch break):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 1-hour delivery task
+     * const delivery = model.intervalVar({ length: 1, name: "delivery" });
+     *
+     * // Allowed end times: 1 = allowed, 0 = forbidden
+     * const allowedEnds = model.stepFunction([
+     *     [0, 0],   // Before 9h: forbidden
+     *     [9, 1],   // 9h: business opens, allowed
+     *     [12, 0],  // 12h: lunch break, forbidden
+     *     [13, 1],  // 13h: lunch ends, allowed
+     *     [17, 0],  // 17h: business closes, forbidden
+     * ]);
+     *
+     * // Delivery cannot end when allowedEnds is 0
+     * delivery.forbidEnd(allowedEnds);
+     * model.minimize(delivery.end());
+     *
+     * const result = await model.solve();
+     * // Delivery ends at 9 (starts at 8, ends at earliest allowed time)
+     * ```
      *
      * @see {@link Model.forbidEnd} for the equivalent function on {@link Model}.
      * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -3055,6 +3058,8 @@ export class IntervalVar extends ModelElement {
 }
 // TODO:2 When we have other constraints on sequenceVar then add links into the following doc.
 /**
+ * Ordered sequence of intervals for routing and sequencing problems.
+ *
  * @remarks
  * Models a sequence (order) of interval variables.
  *
@@ -3200,6 +3205,8 @@ export class SequenceVar extends ModelElement {
     }
 }
 /**
+ * Tracks cumulative resource usage over time for capacity constraints.
+ *
  * @remarks
  * Cumulative expression.
  *
@@ -3338,7 +3345,7 @@ export class CumulExpr extends ModelElement {
      * ### Example with variable capacity
      *
      * ```ts
-     * let model = new CP.Model;
+     * let model = new CP.Model();
      * let task1 = model.intervalVar({ length: 5, name: "task1" });
      * let task2 = model.intervalVar({ length: 10, name: "task2" });
      *
@@ -3389,6 +3396,8 @@ export class CumulExpr extends ModelElement {
     }
 }
 /**
+ * Piecewise-constant function mapping time to integers, used for costs and availability windows.
+ *
  * @remarks
  * Integer step function.
  *
@@ -3483,6 +3492,27 @@ export class IntStepFunction extends ModelElement {
 /** @internal */
 function GetIntStepFunction(arg) {
     VerifyInstanceOf(arg, IntStepFunction);
+    return arg._getArg();
+}
+/** @internal */
+export class StateFunction extends ModelElement {
+    /** @internal */
+    static _Create(cp, func, args) {
+        const instance = Object.create(StateFunction.prototype);
+        instance._cp = cp;
+        instance._props = { func, args };
+        instance._arg = { arg: undefined, ref: undefined };
+        return instance;
+    }
+    /** @internal */
+    _alwaysEqual(interval, value) {
+        let outParams = [this._getArg(), GetIntervalVar(interval), GetInt(value)];
+        return Constraint._Create(this._cp, "alwaysEqual", outParams);
+    }
+}
+/** @internal */
+function GetStateFunction(arg) {
+    VerifyInstanceOf(arg, StateFunction);
     return arg._getArg();
 }
 /** @internal */
@@ -3781,6 +3811,7 @@ Failure-Directed Search:\n\
   --fdsDualResetRatings bool       Whether to reset ratings when a new LB is proved\n\
 \n\
 Large Neighborhood Search:\n\
+  --lnsMode Robust|Focused         LNS solution pool strategy\n\
   --lnsUseWarmStartOnly bool       Use only the user-provided warm start as the initial solution in LNS\n\
 \n\
 Simple Lower Bound:\n\
@@ -3869,34 +3900,6 @@ export function parseParameters(arg1, arg2) {
  *
  * If `--help` or `-h` is given, the function prints help starting with the `usage`
  * option (if provided), followed by the list of recognized parameters:
- *
- * ```text
- * Help:
- *   --help, -h                       Print this help
- *   --optalcpVersion                 Print OptalCP version information
- *
- * Solver path:
- *   --solverPath string              Path to the solver
- *
- * Terminal output:
- *   --color Never|Auto|Always        Whether to colorize output to the terminal
- *
- * Major options:
- *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSDual|SetTimes
- *                                    Type of search to use
- *   --randomSeed uint32              Random seed
- *   --logLevel uint32                Level of the log
- *   --warningLevel uint32            Level of warnings
- *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, the correctness of solutions is verified
- *
- * Limits:
- *   --timeLimit double               Wall clock limit for execution
- *   --solutionLimit uint64           Stop the search after the given number of solutions
- *
- * ...
- * ```
  *
  * {@link WorkerParameters} can be specified for individual workers using `--workerN.` prefix.
  * For example, `--worker0.searchType FDS` sets the search type for the first worker only.
@@ -4005,18 +4008,9 @@ function isWebSocketUrl(s) {
 // relPath is the relative path within the package from its "bin" directory.
 function getSolverPathFromPackage(packageName, relPath) {
     try {
-        let binPath = import.meta.resolve(packageName + "/bin/");
-        // On Unix the URI looks like this:
-        //   file:///home/.../node_modules/@scheduleopt/optalcp-bin/bin/
-        // Then we have to strip the "file://" prefix, but not the third slash.
-        if (binPath.startsWith("file://"))
-            binPath = binPath.slice(7);
-        // On windows the URI may look like this:
-        //   file:///C:/Users/.../node_modules/@scheduleopt/optalcp-bin/bin/
-        // So we have to strip THREE slashes in this case:
-        if (process.platform === "win32" && binPath.startsWith("/"))
-            binPath = binPath.slice(1);
-        let result = binPath.endsWith("/") ? binPath + relPath : binPath + "/" + relPath;
+        let binPath = fileURLToPath(import.meta.resolve(packageName + "/bin/"));
+        let result = binPath.endsWith("/") || binPath.endsWith("\\")
+            ? binPath + relPath : binPath + "/" + relPath;
         if (fs.existsSync(result))
             return result;
         console.warn(`Found ${binPath} but the binary ${relPath} is not present there.`);
@@ -4037,6 +4031,10 @@ export function calcSolverPath(params = {}) {
  include the parameters in the result.
  */
 function parametersToCLA(params) {
+    // Hidden/internal parameters are stored with a leading '_' (e.g.
+    // '_lnsAlternativeWeight'); the solver's CLI parser wants the bare
+    // name, so strip the marker when emitting.
+    const stripHidden = (key) => key.startsWith("_") ? key.substring(1) : key;
     let result = "";
     const p = params;
     for (const key in p) {
@@ -4044,7 +4042,7 @@ function parametersToCLA(params) {
             continue;
         let value = p[key];
         if (value !== undefined && value !== null && typeof value !== "object")
-            result += "--" + key + " " + p[key] + " ";
+            result += "--" + stripHidden(key) + " " + p[key] + " ";
     }
     if (params.workers !== undefined) {
         for (let i = 0; i < params.workers.length; i++) {
@@ -4053,7 +4051,7 @@ function parametersToCLA(params) {
                 continue;
             let prefix = "worker" + i + ".";
             for (const key in w)
-                result += "--" + prefix + key + " " + w[key] + " ";
+                result += "--" + prefix + stripHidden(key) + " " + w[key] + " ";
         }
     }
     return result;
@@ -4283,28 +4281,6 @@ const ParameterCatalog = {
     setRelativeGapTolerance: function (params, value) {
         params.relativeGapTolerance = value;
     },
-    // TagsFromNames
-    /** @internal */
-    _setTagsFromNames: function (params, value) {
-        if (typeof value !== 'string')
-            throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
-        switch (value.toLowerCase()) {
-            case 'never':
-                value = 'Never';
-                break;
-            case 'auto':
-                value = 'Auto';
-                break;
-            case 'merge':
-                value = 'Merge';
-                break;
-            case 'force':
-                value = 'Force';
-                break;
-            default: throw Error('Parameter TagsFromNames: value "' + value + '" is not valid.');
-        }
-        params._tagsFromNames = value;
-    },
     // NoOverlapPropagationLevel
     setNoOverlapPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
@@ -4317,8 +4293,8 @@ const ParameterCatalog = {
     setCumulPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter CumulPropagationLevel: value " + value + " is not an integer.");
-        if (value < 0 || value > 3)
-            throw Error("Parameter CumulPropagationLevel: value " + value + " is not in required range 0..3.");
+        if (value < 0 || value > 4)
+            throw Error("Parameter CumulPropagationLevel: value " + value + " is not in required range 0..4.");
         workerParams.cumulPropagationLevel = value;
     },
     // ReservoirPropagationLevel
@@ -4699,6 +4675,21 @@ const ParameterCatalog = {
     setFDSDualResetRatings: function (workerParams, value) {
         workerParams.fdsDualResetRatings = value;
     },
+    // LNSMode
+    setLNSMode: function (workerParams, value) {
+        if (typeof value !== 'string')
+            throw Error('Parameter LNSMode: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'robust':
+                value = 'Robust';
+                break;
+            case 'focused':
+                value = 'Focused';
+                break;
+            default: throw Error('Parameter LNSMode: value "' + value + '" is not valid.');
+        }
+        workerParams.lnsMode = value;
+    },
     // LNSInitNoOverlapPropagationLevel
     /** @internal */
     _setLNSInitNoOverlapPropagationLevel: function (workerParams, value) {
@@ -4713,8 +4704,8 @@ const ParameterCatalog = {
     _setLNSInitCumulPropagationLevel: function (workerParams, value) {
         if (!Number.isInteger(value))
             throw Error("Parameter LNSInitCumulPropagationLevel: value " + value + " is not an integer.");
-        if (value < 0 || value > 3)
-            throw Error("Parameter LNSInitCumulPropagationLevel: value " + value + " is not in required range 0..3.");
+        if (value < 0 || value > 4)
+            throw Error("Parameter LNSInitCumulPropagationLevel: value " + value + " is not in required range 0..4.");
         workerParams._lnsInitCumulPropagationLevel = value;
     },
     // LNSFirstFailLimit
@@ -4818,6 +4809,13 @@ const ParameterCatalog = {
             throw Error("Parameter LNSApplyCutProbability: value " + value + " is not in required range 0..1.");
         workerParams._lnsApplyCutProbability = value;
     },
+    // LNSSkipNoImprovementProbability
+    /** @internal */
+    _setLNSSkipNoImprovementProbability: function (workerParams, value) {
+        if (value < 0 || value > 1)
+            throw Error("Parameter LNSSkipNoImprovementProbability: value " + value + " is not in required range 0..1.");
+        workerParams._lnsSkipNoImprovementProbability = value;
+    },
     // LNSSmallStructureLimit
     /** @internal */
     _setLNSSmallStructureLimit: function (workerParams, value) {
@@ -4831,6 +4829,41 @@ const ParameterCatalog = {
     /** @internal */
     _setLNSResourceOptimization: function (workerParams, value) {
         workerParams._lnsResourceOptimization = value;
+    },
+    // LNSAbsentCoreWeight
+    /** @internal */
+    _setLNSAbsentCoreWeight: function (workerParams, value) {
+        if (value < 0 || value > 10)
+            throw Error("Parameter LNSAbsentCoreWeight: value " + value + " is not in required range 0..10.");
+        workerParams._lnsAbsentCoreWeight = value;
+    },
+    // ArcWeightAbsentOverride
+    /** @internal */
+    _setArcWeightAbsentOverride: function (workerParams, value) {
+        if (value < 0 || value > 10)
+            throw Error("Parameter ArcWeightAbsentOverride: value " + value + " is not in required range 0..10.");
+        workerParams._arcWeightAbsentOverride = value;
+    },
+    // ArcWeightAlternativeChosen
+    /** @internal */
+    _setArcWeightAlternativeChosen: function (workerParams, value) {
+        if (value < 0 || value > 10)
+            throw Error("Parameter ArcWeightAlternativeChosen: value " + value + " is not in required range 0..10.");
+        workerParams._arcWeightAlternativeChosen = value;
+    },
+    // ArcWeightAlternativeNotChosen
+    /** @internal */
+    _setArcWeightAlternativeNotChosen: function (workerParams, value) {
+        if (value < 0 || value > 10)
+            throw Error("Parameter ArcWeightAlternativeNotChosen: value " + value + " is not in required range 0..10.");
+        workerParams._arcWeightAlternativeNotChosen = value;
+    },
+    // ArcWeightTouchingPOS
+    /** @internal */
+    _setArcWeightTouchingPOS: function (workerParams, value) {
+        if (value < 0 || value > 100)
+            throw Error("Parameter ArcWeightTouchingPOS: value " + value + " is not in required range 0..100.");
+        workerParams._arcWeightTouchingPOS = value;
     },
     // LNSRestoreAbsentIntervals
     /** @internal */
@@ -4846,6 +4879,11 @@ const ParameterCatalog = {
     /** @internal */
     _setLNSRestoreIntVarValues: function (workerParams, value) {
         workerParams._lnsRestoreIntVarValues = value;
+    },
+    // LNSAlwaysRelaxObjective
+    /** @internal */
+    _setLNSAlwaysRelaxObjective: function (workerParams, value) {
+        workerParams._lnsAlwaysRelaxObjective = value;
     },
     // LNSUseWarmStartOnly
     setLNSUseWarmStartOnly: function (workerParams, value) {
@@ -5011,10 +5049,27 @@ const ParameterCatalog = {
     _setLNSFDS: function (workerParams, value) {
         workerParams._lnsFDS = value;
     },
-    // LNSFreezeIntervalsBeforeFragment
+    // LNSFragmentFreezing
     /** @internal */
-    _setLNSFreezeIntervalsBeforeFragment: function (workerParams, value) {
-        workerParams._lnsFreezeIntervalsBeforeFragment = value;
+    _setLNSFragmentFreezing: function (workerParams, value) {
+        if (typeof value !== 'string')
+            throw Error('Parameter LNSFragmentFreezing: value "' + value + '" is not valid.');
+        switch (value.toLowerCase()) {
+            case 'off':
+                value = 'Off';
+                break;
+            case 'beforeonly':
+                value = 'BeforeOnly';
+                break;
+            case 'on':
+                value = 'On';
+                break;
+            case 'unsafe':
+                value = 'Unsafe';
+                break;
+            default: throw Error('Parameter LNSFragmentFreezing: value "' + value + '" is not valid.');
+        }
+        workerParams._lnsFragmentFreezing = value;
     },
     // LNSRelaxSlack
     /** @internal */
@@ -5026,8 +5081,8 @@ const ParameterCatalog = {
     // LNSPortionMultiplier
     /** @internal */
     _setLNSPortionMultiplier: function (workerParams, value) {
-        if (value < 0.010000 || value > 10.000000)
-            throw Error("Parameter LNSPortionMultiplier: value " + value + " is not in required range 0.010000..10.000000.");
+        if (value < 0.000001 || value > 10.000000)
+            throw Error("Parameter LNSPortionMultiplier: value " + value + " is not in required range 0.000001..10.000000.");
         workerParams._lnsPortionMultiplier = value;
     },
     // SimpleLBWorker
@@ -5267,6 +5322,15 @@ const ParameterCatalog = {
             throw Error("Parameter SetTimesDensityReliabilityThreshold: value " + value + " is not in required range 0..4294967295.");
         workerParams._setTimesDensityReliabilityThreshold = value;
     },
+    // LNSDisabledHeuristics
+    /** @internal */
+    _setLNSDisabledHeuristics: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter LNSDisabledHeuristics: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter LNSDisabledHeuristics: value " + value + " is not in required range 0..4294967295.");
+        workerParams._lnsDisabledHeuristics = value;
+    },
     // SetTimesNbExtendsFactor
     /** @internal */
     _setSetTimesNbExtendsFactor: function (workerParams, value) {
@@ -5282,6 +5346,30 @@ const ParameterCatalog = {
         if (value < 0 || value > 16)
             throw Error("Parameter DiscreteLowCapacityLimit: value " + value + " is not in required range 0..16.");
         workerParams._discreteLowCapacityLimit = value;
+    },
+    // PresolveCumulRule1
+    /** @internal */
+    _setPresolveCumulRule1: function (workerParams, value) {
+        workerParams._presolveCumulRule1 = value;
+    },
+    // PresolveCumulRule2
+    /** @internal */
+    _setPresolveCumulRule2: function (workerParams, value) {
+        workerParams._presolveCumulRule2 = value;
+    },
+    // PresolveCumulRule3
+    /** @internal */
+    _setPresolveCumulRule3: function (workerParams, value) {
+        workerParams._presolveCumulRule3 = value;
+    },
+    // PresolveCumulRule4MaxDemands
+    /** @internal */
+    _setPresolveCumulRule4MaxDemands: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter PresolveCumulRule4MaxDemands: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter PresolveCumulRule4MaxDemands: value " + value + " is not in required range 0..4294967295.");
+        workerParams._presolveCumulRule4MaxDemands = value;
     },
     // LNSTrainingObjectiveLimit
     /** @internal */
@@ -5329,6 +5417,29 @@ const ParameterCatalog = {
         if (value < 4 || value > 20)
             throw Error("Parameter TimeNetSubPriorityBits: value " + value + " is not in required range 4..20.");
         workerParams._timeNetSubPriorityBits = value;
+    },
+    // MinChainLength
+    /** @internal */
+    _setMinChainLength: function (workerParams, value) {
+        if (!Number.isInteger(value))
+            throw Error("Parameter MinChainLength: value " + value + " is not an integer.");
+        if (value < 0 || value > 4294967295)
+            throw Error("Parameter MinChainLength: value " + value + " is not in required range 0..4294967295.");
+        workerParams._minChainLength = value;
+    },
+    // MonitorInterval
+    /** @internal */
+    _setMonitorInterval: function (params, value) {
+        if (value < 0.000000 || value > Infinity)
+            throw Error("Parameter MonitorInterval: value " + value + " is not in required range 0.000000..Infinity.");
+        params._monitorInterval = value;
+    },
+    // MonitorThreshold
+    /** @internal */
+    _setMonitorThreshold: function (params, value) {
+        if (value < 0 || value > 100)
+            throw Error("Parameter MonitorThreshold: value " + value + " is not in required range 0..100.");
+        params._monitorThreshold = value;
     },
 };
 /** @internal */
@@ -5454,11 +5565,6 @@ const parserConfig = {
         name: 'RelativeGapTolerance',
         parse: ParseNumber,
         setGlobally: ParameterCatalog.setRelativeGapTolerance,
-    },
-    tagsfromnames: {
-        name: 'TagsFromNames',
-        parse: ParseString,
-        setGlobally: ParameterCatalog._setTagsFromNames,
     },
     nooverlappropagationlevel: {
         name: 'NoOverlapPropagationLevel',
@@ -5752,6 +5858,12 @@ const parserConfig = {
         setGlobally: ParameterCatalog.setFDSDualResetRatings,
         setOnWorker: ParameterCatalog.setFDSDualResetRatings,
     },
+    lnsmode: {
+        name: 'LNSMode',
+        parse: ParseString,
+        setGlobally: ParameterCatalog.setLNSMode,
+        setOnWorker: ParameterCatalog.setLNSMode,
+    },
     lnsinitnooverlappropagationlevel: {
         name: 'LNSInitNoOverlapPropagationLevel',
         parse: ParseNumber,
@@ -5842,6 +5954,12 @@ const parserConfig = {
         setGlobally: ParameterCatalog._setLNSApplyCutProbability,
         setOnWorker: ParameterCatalog._setLNSApplyCutProbability,
     },
+    lnsskipnoimprovementprobability: {
+        name: 'LNSSkipNoImprovementProbability',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSSkipNoImprovementProbability,
+        setOnWorker: ParameterCatalog._setLNSSkipNoImprovementProbability,
+    },
     lnssmallstructurelimit: {
         name: 'LNSSmallStructureLimit',
         parse: ParseNumber,
@@ -5853,6 +5971,36 @@ const parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setLNSResourceOptimization,
         setOnWorker: ParameterCatalog._setLNSResourceOptimization,
+    },
+    lnsabsentcoreweight: {
+        name: 'LNSAbsentCoreWeight',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSAbsentCoreWeight,
+        setOnWorker: ParameterCatalog._setLNSAbsentCoreWeight,
+    },
+    arcweightabsentoverride: {
+        name: 'ArcWeightAbsentOverride',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setArcWeightAbsentOverride,
+        setOnWorker: ParameterCatalog._setArcWeightAbsentOverride,
+    },
+    arcweightalternativechosen: {
+        name: 'ArcWeightAlternativeChosen',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setArcWeightAlternativeChosen,
+        setOnWorker: ParameterCatalog._setArcWeightAlternativeChosen,
+    },
+    arcweightalternativenotchosen: {
+        name: 'ArcWeightAlternativeNotChosen',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setArcWeightAlternativeNotChosen,
+        setOnWorker: ParameterCatalog._setArcWeightAlternativeNotChosen,
+    },
+    arcweighttouchingpos: {
+        name: 'ArcWeightTouchingPOS',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setArcWeightTouchingPOS,
+        setOnWorker: ParameterCatalog._setArcWeightTouchingPOS,
     },
     lnsrestoreabsentintervals: {
         name: 'LNSRestoreAbsentIntervals',
@@ -5871,6 +6019,12 @@ const parserConfig = {
         parse: ParseBool,
         setGlobally: ParameterCatalog._setLNSRestoreIntVarValues,
         setOnWorker: ParameterCatalog._setLNSRestoreIntVarValues,
+    },
+    lnsalwaysrelaxobjective: {
+        name: 'LNSAlwaysRelaxObjective',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setLNSAlwaysRelaxObjective,
+        setOnWorker: ParameterCatalog._setLNSAlwaysRelaxObjective,
     },
     lnsusewarmstartonly: {
         name: 'LNSUseWarmStartOnly',
@@ -6022,11 +6176,11 @@ const parserConfig = {
         setGlobally: ParameterCatalog._setLNSFDS,
         setOnWorker: ParameterCatalog._setLNSFDS,
     },
-    lnsfreezeintervalsbeforefragment: {
-        name: 'LNSFreezeIntervalsBeforeFragment',
-        parse: ParseBool,
-        setGlobally: ParameterCatalog._setLNSFreezeIntervalsBeforeFragment,
-        setOnWorker: ParameterCatalog._setLNSFreezeIntervalsBeforeFragment,
+    lnsfragmentfreezing: {
+        name: 'LNSFragmentFreezing',
+        parse: ParseString,
+        setGlobally: ParameterCatalog._setLNSFragmentFreezing,
+        setOnWorker: ParameterCatalog._setLNSFragmentFreezing,
     },
     lnsrelaxslack: {
         name: 'LNSRelaxSlack',
@@ -6195,6 +6349,12 @@ const parserConfig = {
         setGlobally: ParameterCatalog._setSetTimesDensityReliabilityThreshold,
         setOnWorker: ParameterCatalog._setSetTimesDensityReliabilityThreshold,
     },
+    lnsdisabledheuristics: {
+        name: 'LNSDisabledHeuristics',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setLNSDisabledHeuristics,
+        setOnWorker: ParameterCatalog._setLNSDisabledHeuristics,
+    },
     settimesnbextendsfactor: {
         name: 'SetTimesNbExtendsFactor',
         parse: ParseNumber,
@@ -6206,6 +6366,30 @@ const parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setDiscreteLowCapacityLimit,
         setOnWorker: ParameterCatalog._setDiscreteLowCapacityLimit,
+    },
+    presolvecumulrule1: {
+        name: 'PresolveCumulRule1',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setPresolveCumulRule1,
+        setOnWorker: ParameterCatalog._setPresolveCumulRule1,
+    },
+    presolvecumulrule2: {
+        name: 'PresolveCumulRule2',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setPresolveCumulRule2,
+        setOnWorker: ParameterCatalog._setPresolveCumulRule2,
+    },
+    presolvecumulrule3: {
+        name: 'PresolveCumulRule3',
+        parse: ParseBool,
+        setGlobally: ParameterCatalog._setPresolveCumulRule3,
+        setOnWorker: ParameterCatalog._setPresolveCumulRule3,
+    },
+    presolvecumulrule4maxdemands: {
+        name: 'PresolveCumulRule4MaxDemands',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setPresolveCumulRule4MaxDemands,
+        setOnWorker: ParameterCatalog._setPresolveCumulRule4MaxDemands,
     },
     lnstrainingobjectivelimit: {
         name: 'LNSTrainingObjectiveLimit',
@@ -6248,6 +6432,22 @@ const parserConfig = {
         parse: ParseNumber,
         setGlobally: ParameterCatalog._setTimeNetSubPriorityBits,
         setOnWorker: ParameterCatalog._setTimeNetSubPriorityBits,
+    },
+    minchainlength: {
+        name: 'MinChainLength',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setMinChainLength,
+        setOnWorker: ParameterCatalog._setMinChainLength,
+    },
+    monitorinterval: {
+        name: 'MonitorInterval',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setMonitorInterval,
+    },
+    monitorthreshold: {
+        name: 'MonitorThreshold',
+        parse: ParseNumber,
+        setGlobally: ParameterCatalog._setMonitorThreshold,
     },
 };
 /** @internal */
@@ -6376,6 +6576,8 @@ class ParameterParser {
 }
 ;
 /**
+ * Access to variable values after solving.
+ *
  * @remarks
  * Solution of a {@link Model}. When a model is solved, the solution is stored
  * in this object. The solution contains values of all variables in the model
@@ -6413,6 +6615,7 @@ export class Solution {
      * // Create an external solution
      * const solution = new CP.Solution();
      * solution.setValue(x, 0, 10);  // x starts at 0, ends at 10
+     * solution.setObjective(10);    // objective value = x.end() = 10
      *
      * // Use it as a warm start
      * const result = await model.solve({ timeLimit: 60 }, solution);
@@ -6672,6 +6875,8 @@ export class ModelDomains {
 ;
 // === Class Model ===========================================================
 /**
+ * Central class for building optimization models. Creates variables, constraints, and objectives.
+ *
  * @remarks
  * _Model_ captures the problem to be solved. It contains variables,
  * constraints and objective function.
@@ -6927,7 +7132,7 @@ export class Model {
     /**
      * Negation of the boolean expression `arg`.
      *
-     * @param arg The boolean expression to negate.
+     * @param arg The argument to negate ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6943,8 +7148,8 @@ export class Model {
     /**
      * Logical _OR_ of boolean expressions `lhs` and `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6960,8 +7165,8 @@ export class Model {
     /**
      * Logical _AND_ of boolean expressions `lhs` and `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -6977,8 +7182,8 @@ export class Model {
     /**
      * Logical implication of two boolean expressions, that is `lhs` implies `rhs`.
      *
-     * @param lhs The first boolean expression.
-     * @param rhs The second boolean expression.
+     * @param lhs The left-hand side operand ({@link BoolExpr} or `bool`).
+     * @param rhs The right-hand side operand ({@link BoolExpr} or `bool`).
      *
      * @returns The resulting Boolean expression
      *
@@ -7009,7 +7214,7 @@ export class Model {
     /**
      * Creates an expression that replaces value *absent* by a constant.
      *
-     * @param arg The integer expression to guard.
+     * @param arg The argument to guard ({@link IntExpr} or `int`).
      * @param absentValue The value to use when the expression is absent.
      *
      * @returns The resulting integer expression
@@ -7072,8 +7277,8 @@ export class Model {
     /**
      * Constrains `lhs` and `rhs` to be identical, including their presence status.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The identity constraint.
      *
@@ -7165,7 +7370,7 @@ export class Model {
     /**
      * Creates Boolean expression `lb` &le; `arg` &le; `ub`.
      *
-     * @param arg The integer expression to check.
+     * @param arg The argument to check ({@link IntExpr} or `int`).
      * @param lb The lower bound of the range.
      * @param ub The upper bound of the range.
      *
@@ -7190,7 +7395,7 @@ export class Model {
     /**
      * Creates an integer expression which is absolute value of `arg`.
      *
-     * @param arg The integer expression.
+     * @param arg The argument ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -7206,8 +7411,8 @@ export class Model {
     /**
      * Creates an integer expression which is the minimum of `lhs` and `rhs`.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -7223,8 +7428,8 @@ export class Model {
     /**
      * Creates an integer expression which is the maximum of `lhs` and `rhs`.
      *
-     * @param lhs The first integer expression.
-     * @param rhs The second integer expression.
+     * @param lhs The left-hand side operand ({@link IntExpr} or `int`).
+     * @param rhs The right-hand side operand ({@link IntExpr} or `int`).
      *
      * @returns The resulting integer expression
      *
@@ -7532,7 +7737,7 @@ export class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] ≤ row[1] ≤ row[2] lexicographically
@@ -7575,7 +7780,7 @@ export class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] < row[1] < row[2] lexicographically
@@ -7620,7 +7825,7 @@ export class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] ≥ row[1] ≥ row[2] lexicographically
@@ -7663,7 +7868,7 @@ export class Model {
      *
      * // Variables for a 3x3 matrix where rows should be lexicographically ordered
      * const rows = Array.from({ length: 3 }, (_, i) =>
-     *   Array.from({ length: 3 }, (_, j) => model.intVar(0, 9, `x_${i}_${j}`))
+     *   Array.from({ length: 3 }, (_, j) => model.intVar({ min: 0, max: 9, name: `x_${i}_${j}` }))
      * );
      *
      * // Break row symmetry: row[0] > row[1] > row[2] lexicographically
@@ -8195,6 +8400,18 @@ export class Model {
             outParams.push(this._getIntMatrix(transitions));
         return Constraint._Create(this, "noOverlap", outParams);
     }
+    /** @internal */
+    _selectiveDisjunction(intervals, types, transitions) {
+        let outParams = [this._getIntervalVarArray(intervals), this._getIntArray(types)];
+        if (transitions !== undefined)
+            outParams.push(this._getIntMatrix(transitions));
+        return Constraint._Create(this, "selectiveDisjunction", outParams);
+    }
+    /** @internal */
+    _alwaysEqual(func, interval, value) {
+        let outParams = [GetStateFunction(func), GetIntervalVar(interval), GetInt(value)];
+        return Constraint._Create(this, "alwaysEqual", outParams);
+    }
     /**
      * Creates an expression equal to the position of the `interval` on the `sequence`.
      *
@@ -8272,7 +8489,7 @@ export class Model {
      *   { length: 10, demand: 1},
      * ];
      *
-     * let model = new CP.Model;
+     * let model = new CP.Model();
      * // A set of pulses, one for each task:
      * let pulses: CP.CumulExpr[] = [];
      * // End times of the tasks:
@@ -8304,7 +8521,7 @@ export class Model {
      * If the task `z` is absent, then the variable `wz` has no meaning, and therefore, it should also be absent.
      *
      * ```ts
-     * let model = CP.Model;
+     * let model = new CP.Model();
      * let x = model.intervalVar({ name: "x" });
      * let y = model.intervalVar({ name: "y" });
      * let z = model.intervalVar({ name: "z", optional: true });
@@ -8625,9 +8842,7 @@ export class Model {
      * @remarks
      * This function prevents the specified interval variable from overlapping with segments of the step function where the value is zero. That is, if $[s, e)$ is a segment of the step function where the value is zero, then the interval variable either ends before $s$ ($\mathtt{interval.end()} \le s$) or starts after $e$ ($e \le \mathtt{interval.start()}$).
      *
-     * ## Example
-     *
-     * A production task that cannot overlap with scheduled maintenance windows:
+     * @example A production task that cannot overlap with scheduled maintenance windows:
      *
      * ```ts
      * import * as CP from "optalcp";
@@ -8677,9 +8892,33 @@ export class Model {
      *
      * I.e., the function value at the start of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A factory task that can only start during work hours (excluding breaks):
      *
-     * A factory task that can only start during work hours (excluding breaks):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 2-hour task on a machine
+     * const task = model.intervalVar({ length: 2, name: "task" });
+     *
+     * // Allowed start times: 1 = allowed, 0 = forbidden
+     * // Morning shift 6-14h, but break at 10-11h when no new task can start
+     * const allowedStarts = model.stepFunction([
+     *     [0, 0],   // Before 6h: forbidden
+     *     [6, 1],   // 6h: shift starts, allowed
+     *     [10, 0],  // 10h: break, forbidden
+     *     [11, 1],  // 11h: break ends, allowed
+     *     [14, 0],  // 14h: shift ends, forbidden
+     * ]);
+     *
+     * // Task cannot start when allowedStarts is 0
+     * model.forbidStart(task, allowedStarts);
+     * model.minimize(task.start());
+     *
+     * const result = await model.solve();
+     * // Task starts at 6 (earliest allowed start time)
+     * ```
      *
      * @see {@link IntervalVar.forbidStart} for the equivalent function on {@link IntervalVar}.
      * @see {@link Model.forbidEnd} for similar function that constrains end an interval variable.
@@ -8706,9 +8945,33 @@ export class Model {
      *
      * I.e., the function value at the end of the interval variable cannot be zero.
      *
-     * ## Example
+     * @example A delivery task that must complete during business hours (not during lunch break):
      *
-     * A delivery task that must complete during business hours (not during lunch break):
+     * ```ts
+     * import * as CP from "optalcp";
+     *
+     * const model = new CP.Model();
+     *
+     * // A 1-hour delivery task
+     * const delivery = model.intervalVar({ length: 1, name: "delivery" });
+     *
+     * // Allowed end times: 1 = allowed, 0 = forbidden
+     * // Business hours 9-17h, but deliveries cannot end during lunch 12-13h
+     * const allowedEnds = model.stepFunction([
+     *     [0, 0],   // Before 9h: forbidden
+     *     [9, 1],   // 9h: business opens, allowed
+     *     [12, 0],  // 12h: lunch break, forbidden
+     *     [13, 1],  // 13h: lunch ends, allowed
+     *     [17, 0],  // 17h: business closes, forbidden
+     * ]);
+     *
+     * // Delivery cannot end when allowedEnds is 0
+     * model.forbidEnd(delivery, allowedEnds);
+     * model.minimize(delivery.end());
+     *
+     * const result = await model.solve();
+     * // Delivery ends at 9 (starts at 8, ends at earliest allowed time)
+     * ```
      *
      * @see {@link IntervalVar.forbidEnd} for the equivalent function on {@link IntervalVar}.
      * @see {@link Model.forbidStart} for similar function that constrains start an interval variable.
@@ -8962,7 +9225,7 @@ export class Model {
      * import * as CP from "optalcp";
      *
      * // Set name in constructor
-     * let model = new CP.Model({ name: "MySchedulingProblem" });
+     * let model = new CP.Model("MySchedulingProblem");
      * console.log(model.name);  // "MySchedulingProblem"
      *
      * // Or set name later
@@ -9047,8 +9310,8 @@ export class Model {
      *
      * ```ts
      * const model = new CP.Model();
-     * const x = model.intVar(0, 100, "x");
-     * const y = model.intVar(0, 100, "y");
+     * const x = model.intVar({ min: 0, max: 100, name: "x" });
+     * const y = model.intVar({ min: 0, max: 100, name: "y" });
      *
      * // Enforce various boolean expressions
      * model.enforce([
@@ -9610,6 +9873,13 @@ export class Model {
         return IntStepFunction._CreateWithValues(this, values);
     }
     /** @internal */
+    stateFunction(transitions) {
+        let outParams = [];
+        if (transitions !== undefined)
+            outParams.push(this._getIntMatrix(transitions));
+        return StateFunction._Create(this, "stateFunction", outParams);
+    }
+    /** @internal */
     getPrimaryObjectiveExpression() {
         return this.#primaryObjectiveExpr;
     }
@@ -9681,15 +9951,48 @@ export class Model {
                 this.#primaryObjectiveExpr = IntExpr._Create(this, "reusableIntExpr", [primaryObjectiveArg]);
             }
         }
-        // Find variables in the model
+        // Find variables in the model, converting absent→optional with empty domain
         for (let i = 0; i < this.#refs.length; i++) {
             let props = this.#refs[i];
-            if (props.func === "boolVar")
-                this.#boolVars.push(BoolVar._CreateFromJSON(this, props, i));
-            else if (props.func === "intVar")
-                this.#intVars.push(IntVar._CreateFromJSON(this, props, i));
-            else if (props.func === "intervalVar")
-                this.#intervalVars.push(IntervalVar._CreateFromJSON(this, props, i));
+            let func = props.func;
+            if (func === "intVar" || func === "_intVar") {
+                if (props.status === 2 /* PresenceStatus.Absent */) {
+                    props.status = 0 /* PresenceStatus.Optional */;
+                    props.min = IntVarMax;
+                    props.max = IntVarMin;
+                }
+                if (func === "intVar")
+                    this.#intVars.push(IntVar._CreateFromJSON(this, props, i));
+            }
+            else if (func === "boolVar" || func === "_boolVar") {
+                if (props.status === 2 /* PresenceStatus.Absent */) {
+                    props.status = 0 /* PresenceStatus.Optional */;
+                    props.min = 1;
+                    props.max = 0;
+                }
+                if (func === "boolVar")
+                    this.#boolVars.push(BoolVar._CreateFromJSON(this, props, i));
+            }
+            else if (func === "intervalVar" || func === "_intervalVar") {
+                if (props.status === 2 /* PresenceStatus.Absent */) {
+                    props.status = 0 /* PresenceStatus.Optional */;
+                    props.startMin = IntervalMax;
+                    props.startMax = IntervalMin;
+                    props.endMin = IntervalMax;
+                    props.endMax = IntervalMin;
+                    props.lengthMin = LengthMax;
+                    props.lengthMax = 0;
+                }
+                if (func === "intervalVar")
+                    this.#intervalVars.push(IntervalVar._CreateFromJSON(this, props, i));
+            }
+            else if (func === "floatVar" || func === "_floatVar") {
+                if (props.status === 2 /* PresenceStatus.Absent */) {
+                    props.status = 0 /* PresenceStatus.Optional */;
+                    props.min = FloatVarMax;
+                    props.max = FloatVarMin;
+                }
+            }
         }
     }
     /** @internal */
@@ -9846,8 +10149,8 @@ export class Model {
      * import * as CP from "optalcp";
      *
      * const model = new CP.Model();
-     * const useMachineA = model.boolVar("use_machine_a");
-     * const useMachineB = model.boolVar("use_machine_b");
+     * const useMachineA = model.boolVar({ name: "use_machine_a" });
+     * const useMachineB = model.boolVar({ name: "use_machine_b" });
      *
      * const boolVars = model.getBoolVars();
      * console.log(boolVars.length);  // 2
@@ -9876,8 +10179,8 @@ export class Model {
      * import * as CP from "optalcp";
      *
      * const model = new CP.Model();
-     * const x = model.intVar(0, 10, "x");
-     * const y = model.intVar(0, 100, "y");
+     * const x = model.intVar({ min: 0, max: 10, name: "x" });
+     * const y = model.intVar({ min: 0, max: 100, name: "y" });
      *
      * const intVars = model.getIntVars();
      * console.log(intVars.length);  // 2
@@ -10065,15 +10368,15 @@ export class Model {
      * // Later, load from file
      * const loadedJson = fs.readFileSync("model.json", "utf-8");
      *
-     * // Restore model (returns Model directly in TypeScript)
-     * const model2 = CP.Model.fromJSON(loadedJson);
+     * // Restore model, parameters, and warm start
+     * const { model: model2, parameters: params2, warmStart: warmStart2 } = CP.Model.fromJSON(loadedJson);
      *
      * // Access variables
      * const intervalVars = model2.getIntervalVars();
      * console.log(`Loaded model with ${intervalVars.length} interval variables`);
      *
      * // Solve with restored parameters
-     * const result = await model2.solve(params);
+     * const result = await model2.solve(params2);
      * ```
      *
      * @see {@link Model.toJSON} to export to JSON.
@@ -10191,6 +10494,8 @@ export class Model {
     }
 }
 /**
+ * Async solver with event callbacks for solutions, bounds, and log messages.
+ *
  * @remarks
  * The solver provides asynchronous communication with the solver.
  *
@@ -10891,14 +11196,16 @@ export class Solver {
                     break;
                 case 'summary':
                     this.#closeExpected = true;
+                    // Destructure batched fields so they don't leak into SolveResult via spread
+                    const { solutionValues, objectiveHistory, objectiveBoundHistory, ...summaryData } = msg.data;
                     this.#summary = {
-                        ...msg.data,
+                        ...summaryData,
                         actualWorkers: msg.data.nbWorkers,
                         objectiveBound: msg.data.lowerBound
                     };
                     // Handle batched results (when batchResults was true)
-                    if (msg.data.objectiveHistory !== undefined) {
-                        this.#objectiveHistory = msg.data.objectiveHistory.map((e) => ({ solveTime: e.solveTime, objective: e.objective, valid: e.verifiedOK }));
+                    if (objectiveHistory !== undefined) {
+                        this.#objectiveHistory = objectiveHistory.map((e) => ({ solveTime: e.solveTime, objective: e.objective, valid: e.verifiedOK }));
                         // Set fields from the last entry (normally set by solution messages)
                         if (this.#objectiveHistory.length > 0) {
                             const lastEntry = this.#objectiveHistory[this.#objectiveHistory.length - 1];
@@ -10906,17 +11213,17 @@ export class Solver {
                             this.#solutionValid = lastEntry.valid;
                         }
                     }
-                    if (msg.data.objectiveBoundHistory !== undefined) {
-                        this.#objectiveBoundHistory = msg.data.objectiveBoundHistory;
+                    if (objectiveBoundHistory !== undefined) {
+                        this.#objectiveBoundHistory = objectiveBoundHistory;
                         // Set #boundTime from the last entry (normally set by lowerBound messages)
                         if (this.#objectiveBoundHistory.length > 0)
                             this.#boundTime = this.#objectiveBoundHistory[this.#objectiveBoundHistory.length - 1].solveTime;
                     }
-                    if (msg.data.solutionValues !== undefined) {
+                    if (solutionValues !== undefined) {
                         if (this.#solution === undefined)
                             this.#solution = new Solution();
                         this.#solution._init({
-                            values: msg.data.solutionValues,
+                            values: solutionValues,
                             objective: msg.data.objective
                         });
                     }
@@ -10980,9 +11287,10 @@ export class Solver {
      *
      * @remarks
      * This method only initiates the stop; it returns immediately without waiting
-     * for the solver to actually stop. The solver will stop as soon as possible and
-     * will send a summary event. However, other events may be sent
-     * before the summary event (e.g., another solution found or a log message).
+     * for the solver to actually stop. Because the solver runs asynchronously,
+     * more events (such as additional solutions or log messages) may still arrive
+     * after `stop` is called. The solver will stop as soon as possible, but the
+     * exact timing depends on what it is currently doing.
      *
      * Requesting a stop on a solver that has already stopped has no effect.
      *
@@ -10991,19 +11299,19 @@ export class Solver {
      * In the following example, we issue a stop command 1 minute after the first
      * solution is found.
      * ```ts
-     * let solver = new CP.Solver;
-     * timerStarted = false;
-     * solver.on('solution', (_: SolutionEvent) => {
+     * let solver = new CP.Solver();
+     * let timerStarted = false;
+     * solver.onSolution = (_: CP.SolutionEvent) => {
      *   // We just found a solution. Set a timeout if there isn't any.
-     *  if (!timerStarted) {
-     *    timerStarted = true;
+     *   if (!timerStarted) {
+     *     timerStarted = true;
      *     // Register a function to be called after 60 seconds:
-     *    setTimeout(() => {
-     *      console.log("Requesting solver to stop");
-     *      solver.stop("Stop because I said so!");
-     *    }, 60); // The timeout is 60 seconds
-     *  }
-     * });
+     *     setTimeout(() => {
+     *       console.log("Requesting solver to stop");
+     *       solver.stop("Stop because I said so!");
+     *     }, 60000); // The timeout is 60 seconds
+     *   }
+     * };
      * let result = await solver.solve(model, { timeLimit: 300 });
      * ```
      */
@@ -11457,7 +11765,7 @@ export const BenchmarkParametersHelp =
     "Overall benchmarking output:\n" +
     "  --output fileName      Write detailed results of all runs into a JSON file\n" +
     "  --summary fileName     Write a summary table of all runs into a CSV file\n" +
-    "  --dontOutputSolutions  Do not write solutions into the output file (save space)\n" +
+    "  --dontOutputSolutions  Do not include solutions in the --output file (save space)\n" +
     "\n" +
     "Outputs for individual benchmarking runs:\n" +
     "  --result fileNamePattern         Write a detailed result into a JSON file\n" +
@@ -11486,46 +11794,6 @@ export const BenchmarkParametersHelp =
  * and then terminates the program.
  *
  * The description of supported parameters looks like this:
- * ```text
- * Benchmarking options:
- *   --nbSeeds uint32        Test models on the given number of random seeds
- *   --nbParallelRuns uint32 Run given number of solves in parallel
- *   --minObjective double   Require given minimum objective value
- *   --maxObjective double   Require given maximum objective value
- *   --dontSolve             Not really solve. Useful, e.g., with --exportJSON
- *
- * Overall benchmarking output:
- *   --output fileName      Write detailed results of all runs into a JSON file
- *   --summary fileName     Write a summary table of all runs into a CSV file
- *   --dontOutputSolutions  Do not write solutions into the output file (save space)
- *
- * Outputs for individual benchmarking runs:
- *   --result fileNamePattern         Write a detailed result into a JSON file
- *   --log fileNamePattern            Write log into the specified text file
- *   --exportJSON fileNamePattern     Export problem into a JSON file
- *   --exportTxt fileNamePattern      Export problem into a text file
- * Where fileNamePattern undergoes the following expansion:
- *   {name}       ->  Model name (by convention name of the source data file)
- *   {flat_name}  ->  Like {name} but all characters '/' is replaced by '_'
- *   {seed}       ->  Random seed
- * Solver path:
- *   --solverPath string              Path to the solver
- *
- * Terminal output:
- *   --color Never|Auto|Always        Whether to colorize output to the terminal
- *
- * Major options:
- *   --nbWorkers uint32               Number of threads dedicated to search
- *   --searchType LNS|FDS|FDSDual|SetTimes
- *                                    Type of search to use
- *   --randomSeed uint32              Random seed
- *   --logLevel uint32                Level of the log
- *   --warningLevel uint32            Level of warnings
- *   --logPeriod double               How often to print log messages (in seconds)
- *   --verifySolutions bool           When on, the correctness of solutions is verified
- *
- * ...
- * ```
  *
  * {@link WorkerParameters} can be specified for individual worker(s) using the following prefixes:
  *
